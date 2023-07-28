@@ -1,0 +1,12 @@
+/home/cyakaboski/src/python/modules/PyBKB/tests/Fisherman.bkf
+0.5
+Fisherman
+/home/cyakaboski/src/python/modules/PyBKB/tests/IllegalFishingEvent.bkf
+0.8
+IllegalFishingEvent
+/home/cyakaboski/src/python/modules/PyBKB/tests/IllegalDumpingEvent.bkf
+0.2
+IllegalDumpingEvent
+/home/cyakaboski/src/python/modules/PyBKB/tests/Pirate.bkf
+0.3
+Pirate

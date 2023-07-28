@@ -1,0 +1,1831 @@
+import ray
+import os
+import numpy as np
+from scipy.special import comb
+from sklearn.cluster import KMeans
+from scipy.spatial.distance import cdist
+from scipy.optimize import linear_sum_assignment
+import itertools
+import logging
+import contextlib
+import time
+import tqdm
+from operator import itemgetter
+from pygobnilp.gobnilp import Gobnilp
+from gurobipy import GRB
+from ray.util.placement_group import placement_group, remove_placement_group
+from ray.util import ActorPool
+from ray import workflow
+from multiprocessing import Pool
+
+from pybkb.utils.probability import *
+from pybkb.utils.mp import MPLogger
+from pybkb.scores import *
+from pybkb.learn.report import LearningReport
+from pybkb.bkb import BKB
+from pybkb.bn import BN
+
+
+class BKBGobnilpBackend:
+    def __init__(
+            self,
+            score:str,
+            palim:int=None,
+            only:str=None,
+            ) -> None:
+        """ BKB Gobnilp DAG learning backend.
+
+        Args:
+            :param score: Name of scoring function. Choices: mdl_mi, mdl_ent.
+            :type score: str
+
+        Kwargs:
+            :param palim: Limit on the number of parent sets. 
+            :type palim: int
+            :param only: Return only the data score or model score or both. Options: data, model, None. Defaults to None which means both.
+            :type only: str
+        """
+        if score == 'mdl_mi':
+            self.score_node = MdlMutInfoScoreNode
+        elif score == 'mdl_ent':
+            self.score_node = MdlEntScoreNode
+        else:
+            raise ValueError(f'Unknown score: {score}')
+        self.palim = palim
+        self.score = score
+        self.only = only 
+        self.store = build_probability_store()
+        self.all_scores = {}
+
+    def calculate_all_local_scores(
+            self,
+            data:np.array,
+            feature_states:list,
+            filepath:str=None,
+            verbose:bool=False,
+            logger=None,
+            reset:bool=True,
+            ) -> dict:
+        """ Generates local scores for Gobnilp optimization
+        
+        Args:
+            :param data: Full database to learn over.
+            :type data: np.array
+            :param feature_states: List of feature instantiations.
+            :type feature_states: list
+
+        Kwargs:
+            :param filepath: Optional filepath where local scores will be written. Defaults None.
+            :type filepath: str
+        """
+        # Build feature states index map
+        feature_states_index_map = {fs: idx for idx, fs in enumerate(feature_states)}
+        if reset:
+            # Reset store
+            self.store = build_probability_store()
+            # Calculate scores
+            self.all_scores = {}
+        scores = {}
+        total = data.shape[0]
+        for data_idx in tqdm.tqdm(range(total), desc='Calculating Scores', disable=not verbose, leave=False):
+            scores[data_idx] = self.calculate_local_score(
+                    data_idx,
+                    data,
+                    feature_states,
+                    feature_states_index_map,
+                    )
+            if logger is not None:
+                logger.report(i=data_idx+1, total=total)
+        return scores
+
+    @staticmethod
+    def format_data_for_probs(
+            data:np.array,
+            verbose:bool=False,
+            ):
+        row_indices, col_indices = np.nonzero(data)
+        _data_eff = [set() for _ in range(data.shape[1])]
+        # To be compiled with Numba need a list of sets representation
+        for row_idx, fs_idx in tqdm.tqdm(
+                zip(row_indices, col_indices), 
+                desc='Formatting data', 
+                disable=not verbose, 
+                leave=False,
+                total=len(row_indices),
+                ):
+            _data_eff[fs_idx].add(row_idx)
+        # Recast each set as a numpy array
+        data_eff = []
+        for row_eff in _data_eff:
+            data_eff.append(np.array(list(row_eff), dtype=np.float64))
+        return data_eff
+
+    @staticmethod
+    def get_score_node(score_node_obj, rvi, node_encoding_len, pa=None, all_scores=None):
+        if pa is None:
+            pa = frozenset()
+        try:
+            return all_scores[(rvi, pa)]
+        except KeyError:
+            pass
+        if len(pa) == 0:
+            return score_node_obj(rvi, node_encoding_len)
+        return score_node_obj(rvi, node_encoding_len, pa_set=pa)
+    
+    @staticmethod
+    def collect_rvi_score_nodes(rvis, palim, score_node_obj, all_rvis, node_encoding_len, verbose=False, position=0):
+        score_collection = ScoreCollection(node_encoding_len, score_node_obj)
+        if type(rvis) not in [list, set]:
+            rvis = [rvis]
+        for rvi in tqdm.tqdm(rvis, disable=not verbose, desc='Collecting scores', leave=False, position=position):
+            # Need to add one to palim due to python zero indexing
+            for i in range(palim + 1):
+                # No parent set score
+                if i == 0:
+                    pa_set_iter = [[]]
+                else:
+                    pa_set_iter = itertools.combinations(set.difference(all_rvis, {rvi}), r=i)
+                total_combos = comb(len(all_rvis) - 1, i)
+                for pa_set in pa_set_iter:
+                    score_collection.add_score(frozenset(list(pa_set) + [rvi]))
+        return score_collection.scores
+
+    @staticmethod
+    def collect_score_nodes(
+            num_workers,
+            palim,
+            score_node_obj,
+            all_rvis,
+            node_encoding_len,
+            verbose,
+            pool,
+            ):
+        if num_workers is not None:
+            return BKBGobnilpBackend.collect_score_nodes_distributed(
+                num_workers,
+                palim,
+                score_node_obj,
+                all_rvis,
+                node_encoding_len,
+                verbose,
+                pool
+                )
+        # Collect Score Nodes (Not distributed)
+        score_collection = ScoreCollection(node_encoding_len, score_node_obj)
+        all_rvis = set(all_rvis)
+        for rvi in tqdm.tqdm(all_rvis, desc='Collecting Score Nodes', leave=False, disable=not verbose):
+            scores = BKBGobnilpBackend.collect_rvi_score_nodes(
+                    rvi,
+                    palim,
+                    score_node_obj,
+                    all_rvis,
+                    node_encoding_len,
+                    )
+            score_collection.merge_scores(scores)
+            del scores
+        return score_collection
+
+    @staticmethod
+    def collect_score_nodes_distributed(
+            num_workers,
+            palim,
+            score_node_obj,
+            all_rvis,
+            node_encoding_len,
+            verbose,
+            pool,
+            ):
+        # Initialize
+        score_collection = ScoreCollection(node_encoding_len, score_node_obj)
+        # Callback fn
+        def mp_callback(res):
+            score_collection.merge_scores(res)
+        # Collect 
+        #with Pool(num_workers) as pool:
+        # Setup async results
+        splits = np.array_split(all_rvis, num_workers)
+        results = []
+        for i, rvi_split in enumerate(splits):
+            results.append(
+                    pool.apply_async(
+                        BKBGobnilpBackend.collect_rvi_score_nodes,
+                        (list(rvi_split), palim, score_node_obj, set(all_rvis), node_encoding_len, verbose, i+1),
+                        callback=mp_callback,
+                        )
+                    )
+        with tqdm.tqdm(desc='Collecting Score Nodes', total=len(splits), leave=False, disable=not verbose) as pbar:
+            for r in results:
+                r.wait()
+                pbar.update(1)
+        return score_collection
+
+    @staticmethod
+    def calculate_required_joint_probs(score_collection, data_eff, store, data_len, verbose, num_workers, pool):
+        #required_joints = [joint for joint in score_collection.extract_joint_probs(verbose) if joint not in store]
+        if num_workers is not None:
+            return BKBGobnilpBackend.calculate_required_joint_probs_distributed(
+                    score_collection,
+                    data_eff,
+                    store,
+                    data_len,
+                    verbose,
+                    num_workers,
+                    pool,
+                    )
+        #for indices in tqdm.tqdm(required_joints, desc='Calculating Required Joints', leave=False, disable=not verbose):
+        for indices in score_collection.extract_joint_probs(verbose):
+            _, store = joint_prob_eff(data_eff, data_len, parent_state_indices=indices, store=store)
+        return store
+
+    @staticmethod
+    def calculate_required_joint_probs_distributed(score_collection, data_eff, store, data_len, verbose, num_workers, pool, chunk_size=1e6):
+        # Callback fn
+        def mp_callback(_store):
+            ncalls = _store.pop('__ncalls__')
+            nlookups = _store.pop('__nhashlookups__')
+            store.update(_store)
+            del _store
+            store['__ncalls__'] += ncalls
+            store['__nhashlookups__'] += nlookups
+        # Collect 
+        #with Pool(num_workers) as pool:
+        # Setup async results
+        results = []
+        max_worker_chunk_size = len(score_collection.scores) // num_workers
+        if chunk_size is None or chunk_size > max_worker_chunk_size:
+            chunk_size = max_worker_chunk_size
+        j = 1
+        for sc in score_collection.split_collection(chunk_size):
+            results.append(
+                    pool.apply_async(
+                        joint_probs_eff_from_sc,
+                        (data_eff, data_len, sc, verbose, j, None),
+                        callback=mp_callback,
+                        )
+                    )
+            j += 1
+            if j == num_workers + 1:
+                j = 1
+        with tqdm.tqdm(desc='Calculating Required Joints', total=len(results), leave=False, disable=not verbose) as pbar:
+            for r in results:
+                r.wait()
+                pbar.update(1)
+        return store
+                
+    @staticmethod
+    def calculate_local_score_static(
+            data_idx,
+            data,
+            data_eff,
+            feature_states:list,
+            palim,
+            score_node,
+            feature_states_index_map:dict,
+            filepath:str=None,
+            store:dict=None,
+            only:str=None,
+            all_scores:dict=None,
+            verbose:bool=False,
+            num_workers=10,
+            logger=None,
+            pool=None,
+            ):
+        """ Generates a data instance's local score for Gobnilp optimization. Static method to be used externally.
+        
+        Args:
+            :param data_idx: Row index of data instance to calculate local scores.
+            :type data_idx: int
+            :param data: Full database to learn over.
+            :type data: np.array
+            :param feature_states: List of feature instantiations.
+            :type feature_states: list
+            :param feature_states_index_map: A dictionary mapping feature state tuples to appropriate column index in the data matrix.
+            :type feature_states_index_map: dict
+            :param palim: Parent set limit. None means that there is no limit.
+            :type palim: int
+            :param score_node: The score node object.
+            :type score_node: pybkb.learn.scores.ScoreNode
+
+        Kwargs:
+            :param filepath: Optional filepath where local scores will be written. Defaults None.
+            :type filepath: str
+            :param store: The probability store for the various joint probability calculations.
+            :type store: dict
+            :param only: Return only the data score or model score or both. Options: data, model, None. Defaults to None which means both.
+            :type only: str
+        """
+        # Setup all scores if not passed
+        if all_scores is None:
+            all_scores = {}
+        # Collect feature instantiations in this data instance
+        fs_indices = np.argwhere(data[data_idx,:] == 1).flatten()
+        # Initialize scores
+        scores = defaultdict(dict)
+        # Initialize store if not passed
+        if store is None:
+            store = build_probability_store()
+        # Calculate node encoding length
+        node_encoding_len = np.log2(len(feature_states))
+        # Collect score nodes
+        score_collection = BKBGobnilpBackend.collect_score_nodes(
+            None,
+            palim,
+            score_node,
+            fs_indices,
+            node_encoding_len,
+            verbose,
+            None,
+            )
+        if logger is not None:
+            logger.info('Calculating joint probs')
+        store = BKBGobnilpBackend.calculate_required_joint_probs(
+                score_collection,
+                data_eff,
+                store,
+                data.shape[0],
+                verbose,
+                num_workers,
+                pool,
+                )
+        # Calculate scores
+        if logger is not None:
+            logger.info('Calculating scores probs')
+        scores, store, all_scores = score_collection.calculate_scores(data, data_eff, feature_states, store, feature_states_index_map, only, verbose, all_scores)
+        if filepath:
+            BKBGobnilpBackend.write_scores_to_file(scores)
+        return scores, store, all_scores
+
+    @staticmethod
+    def write_scores_to_file(scores):
+        # Make into string format
+        s = f'{len(scores)}\n'
+        for feature, pa_scores in scores.items():
+            s += f'{feature} {len(pa_scores)}\n'
+            for pa_set, score in pa_scores.items():
+                if pa_set is None:
+                    pa_set = []
+                s += f'{score} {len(pa_set)}'
+                for pa in pa_set:
+                    s += f' {pa}'
+                s += '\n'
+        # Write to file
+        with open(filepath, 'w') as f_:
+            f_.write(s)
+
+    @staticmethod
+    def calculate_local_score_static_old(
+            data_idx,
+            data:np.array,
+            data_eff,
+            feature_states:list,
+            palim,
+            score_node,
+            feature_states_index_map:dict,
+            filepath:str=None,
+            store:dict=None,
+            only:str=None,
+            all_scores:dict=None,
+            verbose:bool=False,
+            ):
+        """ Generates a data instance's local score for Gobnilp optimization. Static method to be used externally.
+        
+        Args:
+            :param data_idx: Row index of data instance to calculate local scores.
+            :type data_idx: int
+            :param data: Full database to learn over.
+            :type data: np.array
+            :param feature_states: List of feature instantiations.
+            :type feature_states: list
+            :param feature_states_index_map: A dictionary mapping feature state tuples to appropriate column index in the data matrix.
+            :type feature_states_index_map: dict
+            :param palim: Parent set limit. None means that there is no limit.
+            :type palim: int
+            :param score_node: The score node object.
+            :type score_node: pybkb.learn.scores.ScoreNode
+
+        Kwargs:
+            :param filepath: Optional filepath where local scores will be written. Defaults None.
+            :type filepath: str
+            :param store: The probability store for the various joint probability calculations.
+            :type store: dict
+            :param only: Return only the data score or model score or both. Options: data, model, None. Defaults to None which means both.
+            :type only: str
+        """
+        if all_scores is None:
+            all_scores = {}
+        # Collect feature instantiations in this data instance
+        fs_indices = np.argwhere(data[data_idx,:] == 1).flatten()
+        # Initialize scores
+        scores = defaultdict(dict)
+        # Initialize store if not passed
+        if store is None:
+            store = build_probability_store()
+        # Calculate node encoding length
+        node_encoding_len = np.log2(len(feature_states))
+        # Calculate Scores
+        for fs_idx in tqdm.tqdm(fs_indices, desc='Calculating instantiation scores', leave=False, disable=not verbose):
+            # Need to add one to palim due to python zero indexing
+            for i in tqdm.tqdm(range(palim + 1), desc='Processing palim', leave=False, disable=not verbose):
+                # No parent set score
+                if i == 0:
+                    node_hash = (fs_idx, frozenset())
+                    if node_hash in all_scores:
+                        scores[str(fs_idx)][frozenset()] = all_scores[node_hash]
+                        continue
+                    node = score_node(fs_idx, node_encoding_len)
+                    score, store = node.calculate_score(
+                            data,
+                            data_eff,
+                            feature_states,
+                            store,
+                            feature_states_index_map=feature_states_index_map,
+                            only=only,
+                            )
+                    # Need to cast index as str for gobnilp
+                    scores[str(fs_idx)][frozenset()] = score
+                    # Add to all scores
+                    all_scores[node_hash] = score
+                    continue
+                # For non empty parent sets
+                total_combos = comb(len(fs_indices) - 1, i)
+                for pa_set in tqdm.tqdm(
+                        itertools.combinations(set.difference(set(fs_indices), {fs_idx}), r=i),
+                        total=total_combos,
+                        desc='Calculating parent set combos',
+                        disable=not verbose,
+                        leave=False,
+                        ):
+                    node_hash = (fs_idx, frozenset([str(pa) for pa in pa_set])) 
+                    if node_hash in all_scores:
+                        scores[str(fs_idx)][frozenset([str(pa) for pa in pa_set])] = all_scores[node_hash]
+                        continue
+                    node = score_node(fs_idx, node_encoding_len, pa_set=pa_set)
+                    score, store = node.calculate_score(
+                            data,
+                            data_eff,
+                            feature_states,
+                            store,
+                            feature_states_index_map=feature_states_index_map,
+                            only=only,
+                            )
+                    # Need to cast index as str for gobnilp
+                    scores[str(fs_idx)][frozenset([str(pa) for pa in pa_set])] = score
+                    # Add to all scores
+                    all_scores[node_hash] = score
+        if filepath:
+            # Make into string format
+            s = f'{len(features)}\n'
+            for feature, pa_scores in scores.items():
+                s += f'{feature} {len(pa_scores)}\n'
+                for pa_set, score in pa_scores.items():
+                    if pa_set is None:
+                        pa_set = []
+                    s += f'{score} {len(pa_set)}'
+                    for pa in pa_set:
+                        s += f' {pa}'
+                    s += '\n'
+            # Write to file
+            with open(filepath, 'w') as f_:
+                f_.write(s)
+        return dict(scores), store, all_scores
+
+    def calculate_local_score(
+            self,
+            data_idx:int,
+            data:np.array,
+            data_eff,
+            feature_states:list,
+            feature_states_index_map:dict,
+            filepath:str=None,
+            all_scores:dict=None,
+            verbose=False,
+            ) -> dict:
+        """ Generates a data instance's local score for Gobnilp optimization
+        
+        Args:
+            :param data_idx: Row index of data instance to calculate local scores.
+            :type data_idx: int
+            :param data: Full database to learn over.
+            :type data: np.array
+            :param feature_states: List of feature instantiations.
+            :type feature_states: list
+            :param feature_states_index_map: A dictionary mapping feature state tuples to appropriate column index in the data matrix.
+            :type feature_states_index_map: dict
+
+        Kwargs:
+            :param filepath: Optional filepath where local scores will be written. Defaults None.
+            :type filepath: str
+        """
+        score, self.store, self.all_scores = self.calculate_local_score_static(
+                data_idx,
+                data,
+                data_eff,
+                feature_states,
+                self.palim,
+                self.score_node,
+                feature_states_index_map,
+                filepath,
+                self.store,
+                self.only,
+                self.all_scores,
+                verbose,
+                self.num_score_workers,
+                None,
+                self.score_pool,
+                )
+        return score
+
+    @staticmethod
+    def convert_dags_to_bkf(dags, scores, name, data, feature_states, feature_states_index_map, store):
+        """ Converts DAG learned by Gobnilp to a BKF inference fragment.
+        """
+        bkfs = []
+        # Get the minimum score 
+        min_score = min(scores)
+        # Collect all minimum score dag indices
+        dag_indices = [i for i, score in enumerate(scores) if score == min_score]
+        for dag_idx in dag_indices:
+            bkf = BKB(name)
+            dag = dags[dag_idx]
+            for node_idx_str in dag.nodes:
+                # Gobnilp names are strings so need recast as int
+                node_idx = int(node_idx_str)
+                # Get head feature name and state name
+                head_feature, head_state = feature_states[node_idx]
+                # Add to BKF
+                bkf.add_inode(head_feature, head_state)
+                # Collect all incident nodes to build the tail
+                tail_indices = []
+                tail = []
+                for edge in dag.in_edges(node_idx_str):
+                    tail_node_idx = int(edge[0])
+                    # Get tail feature and state name
+                    tail_feature, tail_state = feature_states[tail_node_idx]
+                    # Add to BKF
+                    bkf.add_inode(tail_feature, tail_state)
+                    # Collect tail
+                    tail.append((tail_feature, tail_state))
+                    tail_indices.append(tail_node_idx)
+                # Calculate S-node conditional probability
+                prob, store = joint_prob(data, node_idx, tail_indices, store)
+                # Make S-node
+                bkf.add_snode(head_feature, head_state, prob, tail)
+            bkfs.append(bkf)
+        return bkfs
+
+    def learn(
+            self,
+            data:np.array,
+            feature_states:list,
+            verbose:bool=False,
+            scores:dict=None,
+            store:dict=None,
+            end_stage=None,
+            nsols=1,
+            kbest=True,
+            mec=False,
+            pruning=False,
+            num_workers=None,
+            ):
+        """ Learns the best set of BKFs from the data.
+
+        Args:
+            :param data: Full database to learn over.
+            :type data: np.array
+            :param feature_states: List of feature instantiations.
+            :type feature_states: list
+        """
+        # Initialize report
+        report = LearningReport('gobnilp', False)
+        report.initialize_bkf_metrics(data.shape[0])
+        # Build feature states index map
+        feature_states_index_map = {fs: idx for idx, fs in enumerate(feature_states)}
+        # Build more effective data structures
+        data_eff = self.format_data_for_probs(data, verbose=verbose)
+        # Reset store unless one is passed
+        if store is None:
+            self.store = build_probability_store()
+        else:
+            self.store = store
+        # Update palim if necessary
+        if self.palim is None:
+            self.palim = len(set([f for f, s in feature_states])) - 1
+        if end_stage == 'scores':
+            scores = self.calculate_all_local_scores(data, feature_states)
+            return scores, self.all_scores, self.store
+        elif end_stage is None:
+            pass
+        else:
+            raise ValueError(f'Unknown end stage option: {end_stage}.')
+        # Set num score workers
+        # Create score_pool
+        self.score_pool = Pool(num_workers)
+        self.num_score_workers = num_workers
+        # Build optimal bkfs
+        bkfs = []
+        for data_idx in tqdm.tqdm(range(data.shape[0]), desc='Learning Fragments', disable=not verbose):
+            # Calculate local scores
+            if scores is None:
+                example_scores = self.calculate_local_score(data_idx, data, data_eff, feature_states, feature_states_index_map)
+            else:
+                example_scores = scores[data_idx]
+            # Update report
+            report.update_from_bkf_store(data_idx, self.store)
+            # Learn the best DAG from these local scores using Gobnilp
+            # Redirect output so we don't have to see this
+            f = open(os.devnull, 'w')
+            with contextlib.redirect_stdout(f):
+                m = Gobnilp()
+                # Start the learning but stop before learning to add constraints
+                m.learn(local_scores_source=example_scores, end='MIP model', nsols=nsols, kbest=kbest, pruning=pruning, mec=mec)
+                # Grab all the adjacency variables
+                adj = [v for p, v in m.adjacency.items()]
+                # Add a constraint that at the DAG must be connected (need to subtract one to make a least a tree)
+                m.addLConstr(sum(adj), GRB.GREATER_EQUAL, np.sum(data[data_idx,:]) - 1)
+            # Close devnull file as to not get resource warning
+            f.close()
+            # Learn the DAG
+            report.start_timer()
+            m.learn(local_scores_source=example_scores, start='MIP model')
+            # Add learning time to report
+            report.add_bkf_metrics(data_idx, learn_time=report.end_timer())
+            # Convert learned DAG to BKF (learned_bn of gobnilp is a subclass of networkx.DiGraph)
+            bkfs.append(
+                    self.convert_dags_to_bkf(
+                        m.learned_bns,
+                        m.learned_scores,
+                        str(data_idx),
+                        data,
+                        feature_states,
+                        feature_states_index_map,
+                        self.store
+                        )
+                    )
+            # Get scores for this bkf to put in report, they'll all have the same score
+            _dscore, _mscore = bkfs[-1][0].score(
+                    data,
+                    feature_states,
+                    self.score,
+                    feature_states_index_map=feature_states_index_map, 
+                    only='both',
+                    store=self.store,
+                    )
+            report.add_bkf_metrics(
+                    data_idx,
+                    model_score=_mscore,
+                    data_score=_dscore,
+                    bns=m.learned_bns,
+                    )
+        self.score_pool.close()
+        self.score_pool.join()
+        return bkfs, report
+
+@ray.remote(num_cpus=1)
+class ScoreWorker:
+    def __init__(self):
+        self.scores = {}
+
+    def get_all_scores(self):
+        return self.scores
+    
+    def calc_score(
+            self,
+            split,
+            split_id,
+            feature_states_id,
+            score_node,
+            feature_states_index_map_id,
+            store,
+            only,
+            node_encoding_len,
+            data_id,
+            ):
+        self.scores = {}
+        logger = MPLogger('Score Worker', logging.INFO, id=split_id, loop_report_time=60)
+        logger.initialize_loop_reporting()
+        logger.info('Starting score calculations.')
+        for i, x_pa in enumerate(split):
+            if len(x_pa) == 1:
+                x = x_pa
+                pa = frozenset()
+                node = score_node(x, node_encoding_len)
+            else:
+                x, pa = x_pa
+                node = score_node(x, node_encoding_len, pa_set=pa)
+            score, store = node.calculate_score(
+                    data_id,
+                    feature_states_id,
+                    store,
+                    feature_states_index_map=feature_states_index_map_id,
+                    only=only,
+                    )
+            self.scores[(x, pa)] = score
+            logger.report(i=i, total=len(split))
+        return None
+
+    def get_score(self, x, pa):
+        try:
+            return self.scores[(x, pa)]
+        except KeyError:
+            return None
+
+    def get_scores(self, x_pa_list):
+        scores = []
+        for x, pa in x_pa_list:
+            score = self.get_score(x, pa)
+            if score is not None:
+                scores.append(np.array([x, pa, score]))
+        return np.array(scores)
+
+
+class ScoreKeeper:
+    def __init__(self, worker_score_ids, worker_handles):
+        self.worker_score_ids = worker_score_ids
+        self.worker_handles = worker_handles
+
+    def collect_all_scores(self):
+        score_ids = []
+        for worker in self.worker_handles:
+            score_ids.append(worker.get_all_scores.remote())
+        scores = {}
+        while score_ids:
+            done_ids, score_ids = ray.wait(score_ids)
+            _scores = ray.get(done_ids[0])
+            scores.update(_scores)
+        return scores
+
+    def get_score(self, x, pa):
+        for worker_handle in self.worker_handles:
+            score = ray.get(worker_handle.get_score.remote(x, pa))
+            if score is not None:
+                return score
+
+    def get_scores(self, x_pa_list):
+        score_ids = []
+        for worker_handle in self.worker_handles:
+            score_ids.append(worker_handle.get_scores.remote(np.array(x_pa_list)))
+        scores = defaultdict(dict)
+        while score_ids:
+            done_ids, score_ids = ray.wait(score_ids)
+            worker_scores = ray.get(done_ids[0])
+            for x, pa, score in worker_scores:
+                pa_str = frozenset([str(y) for y in pa])
+                scores[(str(x), pa_str)] = score
+        return dict(scores)
+
+
+class BKBGobnilpDistributedBackend(BKBGobnilpBackend):
+    def __init__(
+            self,
+            score:str,
+            palim:int=None,
+            only:str=None,
+            ray_address:str=None,
+            strategy:str='precompute',
+            cluster_allocation:float=0.25,
+            save_bkf_dir:str=None,
+            clustering_algo:str=None,
+            ) -> None:
+        """ BKB Gobnilp DAG learning backend that distributes learning over a ray cluster
+
+        Args:
+            :param score: Name of scoring function. Choices: mdl_mi, mdl_ent.
+            :type score: str
+            :param num_learners: Number of ray learner workers to use on each node.
+            :type num_learners: int 
+            :param num_cluster_nodes: Number of ray nodes that are in the cluster.
+            :type num_learners: int 
+
+        Kwargs:
+            :param palim: Limit on the number of parent sets. 
+            :type palim: int
+            :param only: Return only the data score or model score or both. Options: data, model, None. Defaults to None which means both.
+            :type only: str
+            :param ray_address: The address of the Ray cluster. Defaults to auto.
+            :type ray_address: str
+        """
+        if ray_address is None:
+            print('Warning: You did not pass a ray address so assuming ray has already been initialized.')
+        self.ray_address = ray_address
+        self.cluster_allocation = cluster_allocation
+        self.strategy = strategy
+        self.save_bkf_dir = save_bkf_dir
+        self.clustering_algo = clustering_algo
+        if self.save_bkf_dir is not None:
+            if not os.path.exists(self.save_bkf_dir):
+                os.makedirs(self.save_bkf_dir)
+        super().__init__(score, palim, only)
+
+    def setup_cluster(self):
+        """ Function to initialize the ray cluster and bundle workers onto each cluster node to
+        optimize for space.
+        """
+        # Initialize
+        if self.ray_address is not None:
+            ray.init(address=self.ray_address)
+        ## Create bundles
+        # Number of cpus to allocate based on cluster utilization
+        self.available_cpus = ray.available_resources()["CPU"]
+        self.num_cpus = int(self.cluster_allocation * self.available_cpus)
+        self.num_nodes = len(ray.nodes())
+        self.available_cpus_per_node = int(self.available_cpus // self.num_nodes)
+        self.num_workers_per_node = self.num_cpus // self.num_nodes
+        self.num_score_workers_per_worker = int((self.available_cpus_per_node - self.num_workers_per_node - 2) // self.num_workers_per_node)
+        bundles = [{"CPU": self.num_workers_per_node} for _ in range(self.num_nodes)]
+        ## Create Placement Group
+        pg = placement_group(bundles, strategy='STRICT_SPREAD')
+        ## Wait for the placement group to be ready
+        ray.get(pg.ready())
+        return pg, bundles
+
+    def put_data_on_cluster(self, data, feature_states, feature_states_index_map):
+        """ Will put all sharable data into the ray object store.
+        """
+        self.data_id = ray.put(data)
+        self.data = data
+        self.data_eff_id = ray.put(BKBGobnilpBackend.format_data_for_probs(data))
+        self.feature_states_id = ray.put(np.array(feature_states))
+        self.feature_states_index_map_id = ray.put(feature_states_index_map)
+        return 
+
+    def setup_store(self, data, verbose, logger, pg, bundles):
+        # Split row indices over number of available CPUs
+        row_splits = np.array_split(np.array([i for i in range(len(data))]), self.num_cpus)
+        # Setup distributed joint extraction
+        joint_ids = []
+        split_counter = 0
+        bundle_idx = 0
+        for split_id, split in tqdm.tqdm(enumerate(row_splits), desc='Setting up remote probs extraction', disable=not verbose, leave=False):
+            split_counter += 1
+            if split_counter > self.num_workers_per_node:
+                # Move on to the next bundle
+                split_counter = 0
+                bundle_idx += 1
+            joint_ids.append(get_unqiue_joints_and_scores.options(
+                    placement_group=pg,
+                    placement_group_bundle_index=bundle_idx,
+                    ).remote(self.data_id, split, self.palim, split_id))
+        # Now get all joints and merge them
+        unique_joints_to_calc = set()
+        unique_scores_to_calc = set()
+        logger.info('Collecting unique joints and scores.')
+        with tqdm.tqdm(desc='Collecting unique joints and scores', total=len(row_splits), leave=False, disable=not verbose) as pbar:
+            while len(joint_ids):
+                done_ids, joint_ids = ray.wait(joint_ids)
+                _unique_joints_to_calc, _unique_scores_to_calc = ray.get(done_ids[0])
+                for joint in tqdm.tqdm(_unique_joints_to_calc, leave=False, desc='Adding joints.', disable=True):
+                    unique_joints_to_calc.add(joint)
+                for x, pa in tqdm.tqdm(_unique_scores_to_calc, leave=False, desc='Adding scores.', disable=True):
+                    unique_scores_to_calc.add((x,pa))
+                pbar.update(1)
+        # Split probability calculations over available cpus
+        splits = np.array_split(np.array(list(unique_joints_to_calc)), self.num_cpus)
+        store_ids = []
+        for split_id, split in tqdm.tqdm(enumerate(splits), desc='Setting up remote calls', disable=not verbose, leave=False, total=len(splits)):
+            store_ids.append(calc_joint_probs.remote(self.data_id, split, split_id))
+        # Calculate necessary joint probabilities
+        logger.info('Calculating probabilities necessary for scores.')
+        total = len(store_ids)
+        i = 0
+        logger.initialize_loop_reporting()
+        store = build_probability_store()
+        while len(store_ids):
+            i += 1
+            done_ids, store_ids = ray.wait(store_ids)
+            probs, joint_indices_list = ray.get(done_ids[0])
+            for prob, joint_indices in zip(probs, joint_indices_list):
+                store[frozenset(joint_indices)] = prob
+            logger.report(i=i, total=total)
+        store['__ncalls__'] = i
+        logger.info('Finished probability calculations.')
+        return store, unique_scores_to_calc
+
+    def setup_scores(self, data, verbose, logger, store, unique_scores_to_calc, pg, bundles):
+        # Now calculate unique scores
+        splits = np.array_split(np.array(list(unique_scores_to_calc)), self.num_cpus)
+        # Setup score workers
+        workers = [ScoreWorker.remote() for _ in range(len(splits))]
+        score_ids = []
+        for split_id, (split, worker) in tqdm.tqdm(enumerate(zip(splits, workers)), desc='Setting up remote calls', disable=not verbose, leave=False, total=len(splits)):
+            score_ids.append(
+                    worker.calc_score.remote(
+                        split,
+                        split_id,
+                        self.feature_states_id,
+                        self.score_node,
+                        self.feature_states_index_map_id,
+                        store,
+                        self.only,
+                        self.node_encoding_len,
+                        self.data_id,
+                        )
+                    )
+        total = len(score_ids)
+        i = 0
+        logger.initialize_loop_reporting()
+        logger.info('Collecting scores...')
+        score_obj_ids = []
+        while len(score_ids):
+            i += 1
+            done_ids, score_ids = ray.wait(score_ids)
+            logger.report(i=i, total=total)
+        logger.info('Finished score calculations.')
+        score_keeper = ScoreKeeper(score_obj_ids, workers)
+        return score_keeper
+
+    def setup(self, data, verbose, logger, store, scores, pg, bundles):
+        """ Will calculate all the unique probability values needed to compute later scores
+        in order to reduce repeat calculations.
+        """
+        # Get number of CPUs
+        if store is None:
+            logger.info('No store passed, so going to build this now.')
+            store, unique_scores_to_calc = self.setup_store(data, verbose, logger, pg, bundles)
+        if scores is None:
+            logger.info('No scores passed, so going to calculate all unique scores now.')
+            #scores = self.setup_scores(data, verbose, logger, store, num_cpus, unique_scores_to_calc)
+            score_keeper = self.setup_scores(data, verbose, logger, store, unique_scores_to_calc, pg, bundles)
+        return score_keeper, store
+
+    def setup_work(self, data_len, logger, store, verbose, end_stage, score_keeper, pg, bundles):
+        # Split row indices over number of available CPUs
+        row_splits = np.array_split(np.array([i for i in range(data_len)]), self.num_cpus)
+        res_ids = []
+        split_counter = 0
+        bundle_idx = 0
+        for split_id, split in tqdm.tqdm(enumerate(row_splits), desc='Setting up remote calls', disable=not verbose, leave=False, total=len(row_splits)):
+            split_counter += 1
+            if split_counter > self.num_workers_per_node:
+                # Move on to the next bundle
+                split_counter = 0
+                bundle_idx += 1
+            # Build BKF
+            bkfs_id = learn_bkf_structures.options(
+                    placement_group=pg,
+                    placement_group_bundle_index=bundle_idx,
+                    ).remote(
+                        split,
+                        score_keeper,
+                        self.palim,
+                        self.data_id,
+                        self.feature_states_id,
+                        self.feature_states_index_map_id,
+                        store,
+                        split_id,
+                        self.nsols,
+                        self.kbest,
+                        self.mec,
+                        self.pruning,
+                        )
+            res_ids.append(bkfs_id)
+        return res_ids
+        
+    def learn(
+            self, 
+            data, 
+            feature_states, 
+            verbose:bool=False, 
+            end_stage:str=None, 
+            scores:dict=None, 
+            store:dict=None,
+            nsols=1,
+            kbest=True,
+            mec=False,
+            pruning=False,
+            ):
+        """ Learns the best set of BKFs from the data.
+
+        Args:
+            :param data: Full database to learn over.
+            :type data: np.array
+            :param feature_states: List of feature instantiations.
+            :type feature_states: list
+        """
+        self.nsols = nsols
+        self.kbest = kbest
+        self.mec = mec
+        self.pruning = pruning
+        if self.strategy == 'precompute':
+            return self.learn_precompute(data, feature_states, verbose, end_stage, scores, store)
+        elif self.strategy == 'anytime':
+            return self.learn_anytime(data, feature_states, verbose, end_stage, scores, store)
+        else:
+            raise ValueError(f'Unknown strategy: {self.strategy}')
+
+    def get_even_kmeans_clusters(self):
+        ''' Variation of K-means yeilding clusters with equal size.
+        Adapted from: https://stackoverflow.com/questions/5452576/k-means-algorithm-variation-with-equal-cluster-size
+        '''
+        kmeans = KMeans(self.num_cpus)
+        kmeans.fit(self.data)
+        centers = kmeans.cluster_centers_
+        centers = centers.reshape(-1, 1, self.data.shape[-1]).repeat(self.num_cpus, 1).reshape(-1, self.data.shape[-1])
+        distance_matrix = cdist(self.data, centers)
+        clusters_labels = linear_sum_assignment(distance_matrix)[1] #// self.num_cpus
+        _clusters = defaultdict(list)
+        for data_idx, cluster_idx in enumerate(clusters_labels):
+            _clusters[cluster_idx].append(data_idx)
+        clusters = [[] for _ in range(self.num_cpus)]
+        for curr_cluster in range(self.num_cpus):
+            for cluster_idx in _clusters:
+                if len(clusters[curr_cluster]) >= self.data.shape[0] // self.num_cpus:
+                    break
+                try:
+                    data_idx = _clusters[cluster_idx].pop()
+                except IndexError:
+                    continue
+                clusters[curr_cluster].append(data_idx)
+        return clusters
+
+    def split_data_over_cluster(self, logger):
+        if self.clustering_algo is None:
+            clusters = np.array_split(np.array([i for i in range(self.data.shape[0])]), self.num_cpus)
+        elif self.clustering_algo == 'kmeans':
+            logger.info('Running K-means clustering to divide data.')
+            clusters = self.get_even_kmeans_clusters()
+            logger.info('Completed clustering.')
+        else:
+            raise NotImplementedError(f'Clustering method: {self.clustering_algo} is not implemented.')
+        return clusters
+
+    def setup_anytime_work(self, data_len, logger, verbose, pg, bundles):
+        row_splits = self.split_data_over_cluster(logger)
+        # Split row indices over number of available CPUs
+        #row_splits = np.array_split(np.array([i for i in range(data_len)]), self.num_cpus)
+        res_ids = []
+        split_counter = 0
+        bundle_idx = 0
+        for split_id, split in tqdm.tqdm(enumerate(row_splits), desc='Setting up remote calls', disable=not verbose, leave=False, total=len(row_splits)):
+            split_counter += 1
+            if split_counter > self.num_workers_per_node:
+                # Move on to the next bundle
+                split_counter = 0
+                bundle_idx += 1
+            # Build BKF
+            bkfs_id = learn_bkf_structures_and_scores.options(
+                    placement_group=pg,
+                    placement_group_bundle_index=bundle_idx,
+                    ).remote(
+                        split,
+                        self.palim,
+                        self.data_id,
+                        self.data_eff_id,
+                        self.feature_states_id,
+                        self.feature_states_index_map_id,
+                        split_id,
+                        self.save_bkf_dir,
+                        self.score_node,
+                        self.only,
+                        self.nsols,
+                        self.kbest,
+                        self.mec,
+                        self.pruning,
+                        self.num_score_workers_per_worker,
+                        )
+            res_ids.append(bkfs_id)
+        return res_ids
+
+    def learn_anytime(self, data, feature_states, verbose:bool=False, end_stage:str=None, scores:dict=None, store:dict=None):
+        """ Learns the best set of BKFs from the data.
+
+        Args:
+            :param data: Full database to learn over.
+            :type data: np.array
+            :param feature_states: List of feature instantiations.
+            :type feature_states: list
+        """
+        # Update palim if necessary
+        if self.palim is None:
+            self.palim = len(set([f for f, s in feature_states])) - 1
+        self.node_encoding_len = np.log2(len(feature_states))
+        report = LearningReport('gobnilp', False)
+        report.initialize_bkf_metrics(data.shape[0])
+        logger = MPLogger('GobnilpDistributedBackend', logging.INFO, loop_report_time=60)
+        # Build feature states index map
+        feature_states_index_map = {fs: idx for idx, fs in enumerate(feature_states)}
+        # Setup cluster
+        pg, bundles = self.setup_cluster()
+        logger.info('Setup cluster.')
+        # Put data into ray object store
+        self.put_data_on_cluster(
+                data, 
+                feature_states,
+                feature_states_index_map,
+                )
+        logger.info('Put data into object store.')
+        logger.info('Setting up work.')
+        res_ids = self.setup_anytime_work(data.shape[0], logger, verbose, pg, bundles)
+        logger.info('Completed setup.')
+        # Run work
+        results_finished = 0
+        total = len(res_ids)
+        logger.info('Collecting Results...')
+        logger.initialize_loop_reporting()
+        results = []
+        while len(res_ids):
+            done_ids, res_ids = ray.wait(res_ids)
+            res_obj = ray.get(done_ids[0])
+            results_finished += 1
+            logger.report(i=results_finished, total=total)
+            if res_obj is None:
+                continue
+            bkb_objs, learn_times = res_obj
+            for bkf_obj, learn_time in zip(bkb_objs, learn_times):
+                bkfs, report = self.postprocess_bkf(
+                        bkf_obj,
+                        learn_time,
+                        report,
+                        data,
+                        feature_states,
+                        feature_states_index_map,
+                        store,
+                        )
+                results.append(bkfs)
+        logger.info('Removing placement group.')
+        remove_placement_group(pg)
+        if len(results) == 0:
+            return [], report
+        # Sort bkfs into correct order based on data index
+        bkfs_to_sort = [(int(bkfs[0].name), bkfs) for bkfs in results]
+        bkfs = [bkf for i, bkf in sorted(bkfs_to_sort, key=itemgetter(0))]
+        return bkfs, report
+
+    def learn_precompute(self, data, feature_states, verbose:bool=False, end_stage:str=None, scores:dict=None, store:dict=None):
+        """ Learns the best set of BKFs from the data.
+
+        Args:
+            :param data: Full database to learn over.
+            :type data: np.array
+            :param feature_states: List of feature instantiations.
+            :type feature_states: list
+        """
+        # Update palim if necessary
+        if self.palim is None:
+            self.palim = len(set([f for f, s in feature_states])) - 1
+        self.node_encoding_len = np.log2(len(feature_states))
+        report = LearningReport('gobnilp', False)
+        report.initialize_bkf_metrics(data.shape[0])
+        logger = MPLogger('GobnilpDistributedBackend', logging.INFO, loop_report_time=60)
+        # Build feature states index map
+        feature_states_index_map = {fs: idx for idx, fs in enumerate(feature_states)}
+        # Setup cluster
+        pg, bundles = self.setup_cluster()
+        logger.info('Setup cluster.')
+        # Put data into ray object store
+        self.put_data_on_cluster(
+                data, 
+                feature_states,
+                feature_states_index_map,
+                )
+        logger.info('Put data into object store.')
+        # Setup store and calculate unique scores unless one is passed
+        score_keeper, store = self.setup(data, verbose, logger, store, scores, pg, bundles)
+        self.store = store
+        if end_stage == 'scores':
+            return score_keeper.collect_all_scores(), store
+        elif end_stage is None:
+            pass
+        else:
+            raise ValueError(f'Unknown end stage: {end_stage}.')
+        store_id = ray.put(store)
+        logger.info('Setting up BKF work.')
+        #TODO: Calculate all the scores like we did in the calc all scores and put them in the object store
+        #TODO: Then distribute the BKF learning everywhere
+        res_ids = self.setup_work(data.shape[0], logger, store_id, verbose, end_stage, score_keeper, pg, bundles)
+        logger.info('Completed setup.')
+        # Run work
+        results_finished = 0
+        total = len(res_ids)
+        logger.info('Collecting Results...')
+        logger.initialize_loop_reporting()
+        results = []
+        while len(res_ids):
+            done_ids, res_ids = ray.wait(res_ids)
+            res_obj = ray.get(done_ids[0])
+            bkb_objs, learn_times = res_obj
+            for bkf_obj, learn_time in zip(bkb_objs, learn_times):
+                bkfs, report = self.postprocess_bkf(
+                        bkf_obj,
+                        learn_time,
+                        report,
+                        data,
+                        feature_states,
+                        feature_states_index_map,
+                        store,
+                        )
+                results.append(bkfs)
+            results_finished += 1
+            logger.report(i=results_finished, total=total)
+        # Sort bkfs into correct order based on data index
+        bkfs_to_sort = [(int(bkfs[0].name), bkfs) for bkfs in results]
+        bkfs = [_bkfs for i, _bkfs in sorted(bkfs_to_sort, key=itemgetter(0))]
+        logger.info('Removing placement group.')
+        remove_placement_group(pg)
+        return bkfs, report
+
+    def postprocess_bkf(
+            self,
+            bkf_objs,
+            learn_time,
+            report,
+            data,
+            feature_states,
+            feature_states_index_map,
+            store,
+            ):
+        # Load bkf object
+        bkfs = [BKB.loads(bkf_obj) for bkf_obj in bkf_objs]
+        data_idx = int(bkfs[0].name)
+        # Calculate metrics
+        report.add_bkf_metrics(data_idx, learn_time=learn_time)
+        # Get scores for this bkf to put in report
+        _dscore, _mscore = bkfs[0].score(
+                data,
+                feature_states,
+                self.score,
+                feature_states_index_map=feature_states_index_map, 
+                only='both',
+                store=store,
+                )
+        report.add_bkf_metrics(
+                data_idx,
+                model_score=_mscore,
+                data_score=_dscore,
+                )
+        return bkfs, report
+
+class BNGobnilpBackend:
+    def __init__(
+            self,
+            score:str,
+            palim:int=None,
+            only:str=None,
+            ) -> None:
+        """ BKB Gobnilp DAG learning backend.
+
+        Args:
+            :param score: Name of scoring function. Choices: mdl_mi, mdl_ent.
+            :type score: str
+
+        Kwargs:
+            :param palim: Limit on the number of parent sets. 
+            :type palim: int
+            :param only: Return only the data score or model score or both. Options: data, model, None. Defaults to None which means both.
+            :type only: str
+        """
+        if score == 'mdl_mi':
+            self.score_node = MdlMutInfoScoreNode
+        elif score == 'mdl_ent':
+            self.score_node = MdlEntScoreNode
+        else:
+            raise ValueError(f'Unknown score: {score}')
+        self.palim = palim
+        self.score = score
+        self.only = only 
+        self.store = {}
+
+    def calculate_all_local_scores(
+            self,
+            data:np.array,
+            features:set,
+            states:dict,
+            feature_states_map:dict,
+            feature_states:list,
+            filepath:str=None,
+            verbose:bool=False,
+            logger=None,
+            reset:bool=True,
+            all_scores:dict=None
+            ) -> dict:
+        """ Generates local scores for Gobnilp optimization
+        
+        Args:
+            :param data: Full database to learn over.
+            :type data: np.array
+            :param features: A set of feature names.
+            :type features: set
+            :param states: A dictionary of states for each feature. Differs from feature_states_map
+                because it doesn't contain the index of in the feature_states.
+            :type states: dict
+            :param feature_states_map: A dictionary keyed by feature name with 
+                values equalling a list of allowed states of the form [(idx, state_name), ...].
+                Use the pybkb.utils.probability.build_feature_state_map function to build this map.
+            :type feature_states_map: dict
+            :param feature_states: List of feature instantiations.
+            :type feature_states: list
+
+        Kwargs:
+            :param filepath: Optional filepath where local scores will be written. Defaults None.
+            :type filepath: str
+        """
+        node_encoding_len = np.log2(len(features))
+        # Setup parent set limit if None
+        if self.palim is None:
+            palim = len(features) - 1
+        else:
+            palim = self.palim
+        if reset:
+            # Reset store
+            self.store = build_probability_store()
+            # Calculate scores
+            scores = defaultdict(dict)
+        # Initialize scores
+        if all_scores is None:
+            scores = defaultdict(dict)
+        else:
+            scores = all_scores
+        j = 0
+        # Calculate MDL scores
+        for feature in tqdm.tqdm(features, desc='Scoring', disable=not verbose, leave=False):
+            for i in range(palim + 1):
+                if i == 0:
+                    node_hash = (feature, frozenset())
+                    if node_hash in scores:
+                        continue
+                    node = self.score_node(
+                            feature,
+                            node_encoding_len,
+                            states=states,
+                            indices=False,
+                            rv_level=True,
+                            )
+                    score, self.store = node.calculate_score(
+                            data,
+                            feature_states,
+                            self.store,
+                            feature_states_map=feature_states_map,
+                            only=self.only,
+                            )
+                    scores[feature][frozenset()] = score
+                    continue
+                for pa_set in itertools.combinations(set.difference(features, {feature}), r=i):
+                    node_hash = (feature, frozenset([str(pa) for pa in pa_set])) 
+                    if node_hash in scores:
+                        continue
+                    node = self.score_node(
+                            feature,
+                            node_encoding_len,
+                            pa_set=pa_set,
+                            states=states,
+                            indices=False,
+                            rv_level=True,
+                            )
+                    score, self.store = node.calculate_score(
+                            data,
+                            feature_states,
+                            self.store,
+                            feature_states_map=feature_states_map,
+                            only=self.only,
+                            )
+                    scores[feature][frozenset(pa_set)] = score
+            j += 1
+            if logger is not None:
+                logger.report(i=j, total=len(features))
+        if filepath:
+            # Make into string format
+            s = f'{len(features)}\n'
+            for feature, pa_scores in scores.items():
+                s += f'{feature} {len(pa_scores)}\n'
+                for pa_set, score in pa_scores.items():
+                    if pa_set is None:
+                        pa_set = []
+                    s += f'{score} {len(pa_set)}'
+                    for pa in pa_set:
+                        s += f' {pa}'
+                    s += '\n'
+            # Write to file
+            with open(filepath, 'w') as f_:
+                f_.write(s)
+        return dict(scores)
+
+    def learn(self, data:np.array, feature_states:list, verbose:bool=False, scores:dict=None, store:dict=None):
+        """ Learns the best BN from the data.
+
+        Args:
+            :param data: Full database to learn over.
+            :type data: np.array
+            :param feature_states: List of feature instantiations.
+            :type feature_states: list
+        """
+        # Initialize report
+        report = LearningReport('gobnilp', True)
+        # Collect features and states
+        features = []
+        states = defaultdict(list)
+        feature_states_map = build_feature_state_map(feature_states)
+        for f, s in feature_states:
+            features.append(f)
+            states[f].append(s)
+        features = set(features)
+        states = dict(states)
+        # Reset store unless passed
+        if store is None:
+            self.store = build_probability_store()
+        else:
+            self.store = store
+        # Calculate local scores unless passed
+        if scores is None:
+            scores = self.calculate_all_local_scores(data, features, states, feature_states_map, feature_states, verbose=verbose)
+        # Update report with calls to joint calculator
+        report.update_from_store(self.store)
+        # Learn the best DAG from these local scores using Gobnilp
+        m = Gobnilp()
+        # Start the learning but stop before learning to add constraints
+        m.learn(local_scores_source=scores, end='MIP model')
+        # Grab all the adjacency variables
+        adj = [v for p, v in m.adjacency.items()]
+        # Add a constraint that at the DAG must be connected
+        m.addLConstr(sum(adj), GRB.GREATER_EQUAL, len(features) - 1)
+        # Learn the DAG
+        report.start_timer()
+        m.learn(local_scores_source=scores, start='MIP model')
+        report.add_bn_learn_time(report.end_timer())
+        # Convert learned_bn from pygobnilp to interal bn representation so we can score like a BKB
+        bn = BN.from_bnlearn_modelstr(m.learned_bn.bnlearn_modelstring(), states)
+        data_score, model_score = bn.score_like_bkb(
+                data,
+                feature_states,
+                self.score,
+                feature_states_map,
+                only='both',
+                store=self.store,
+                )
+    
+    def _make_snode_hash(self, snode_dict):
+        head_hash = make_hash(snode_dict["Head"])
+        prob_hash = hash(snode_dict["Probability"])
+        tail_hash = make_hash(snode_dict["Tail"])
+        print(head_hash)
+        print(prob_hash)
+        print(tail_hash)
+        return hash((head_hash, prob_hash, tail_hash))
+        report.add_bn_like_bkb_scores(data_score, model_score)
+        # Finialize report
+        report.finalize()
+        return m.learned_bn, m, report
+
+#### Distrbuted Remote Functions
+
+@ray.remote(num_cpus=1)
+def get_unqiue_joints_and_scores(data_id, row_indices, palim, worker_id):
+    logger = MPLogger('Joint Prob Extractor', logging.INFO, id=worker_id, loop_report_time=60)
+    unique_joints_to_calc = set()
+    unique_scores_to_calc = set()
+    logger.info('Starting joint and score extraction.')
+    logger.initialize_loop_reporting()
+    for j, row_idx in enumerate(row_indices):
+        # Collect feature instantiations in this data instance
+        fs_indices = data_id[row_idx].nonzero()[0] #np.argwhere(row == 1).flatten()
+        for fs_idx in fs_indices:
+            for i in range(palim + 1):
+                # No parent set score
+                if i == 0:
+                    joint_indices = frozenset([fs_idx])
+                    if joint_indices not in unique_joints_to_calc:
+                        unique_joints_to_calc.add(joint_indices)
+                        unique_scores_to_calc.add((fs_idx, frozenset()))
+                    continue
+                # For non empty parent sets
+                for pa_set in itertools.combinations(set.difference(set(fs_indices), {fs_idx}), r=i):
+                    unique_scores_to_calc.add((fs_idx, frozenset(pa_set)))
+                    joint_indices = frozenset([fs_idx] + list(pa_set))
+                    if joint_indices not in unique_joints_to_calc:
+                        unique_joints_to_calc.add(joint_indices)
+        logger.report(i=j, total=len(row_indices))
+    return (np.array(list(unique_joints_to_calc)), np.array(list(unique_scores_to_calc)))
+
+@ray.remote
+def calc_joint_prob(data_id, joint_indices):
+    prob, store = joint_prob(data_id, parent_state_indices=list(joint_indices))
+    return (prob, joint_indices)
+
+@ray.remote(num_cpus=1)
+def calc_joint_probs(data_id, joint_indices_list, worker_id):
+    logger = MPLogger('Joint Probability Worker', logging.INFO, id=worker_id, loop_report_time=60)
+    logger.initialize_loop_reporting()
+    probs, store = joint_probs(data_id, parent_state_indices_list=joint_indices_list, logger=logger)
+    return (probs, joint_indices_list)
+
+@ray.remote(num_cpus=1)
+def calc_score(
+            split,
+            split_id,
+            feature_states_id,
+            score_node,
+            feature_states_index_map_id,
+            store,
+            only,
+            node_encoding_len,
+            data_id,
+            ):
+    scores = []
+    variables = []
+    logger = MPLogger('Score Worker', logging.INFO, id=split_id, loop_report_time=60)
+    logger.initialize_loop_reporting()
+    for i, x_pa in enumerate(split):
+        if len(x_pa) == 1:
+            x = x_pa
+            pa = frozenset()
+            node = score_node(x, node_encoding_len)
+        else:
+            x, pa = x_pa
+            node = score_node(x, node_encoding_len, pa_set=pa)
+        score, store = node.calculate_score(
+                data_id,
+                feature_states_id,
+                store,
+                feature_states_index_map=feature_states_index_map_id,
+                only=only,
+                )
+        scores.append(score)
+        variables.append((x, pa))
+        logger.report(i=i, total=len(split))
+    return (np.array(scores), np.array(variables))
+
+@ray.remote(num_cpus=1, num_returns=3)
+def calculate_local_scores(
+        row_indices,
+        data_id,
+        feature_states_id,
+        palim,
+        score_node,
+        feature_states_index_map_id,
+        store,
+        only,
+        split_id,
+        ):
+    """ Gobnilp local score wrapper for ray workflow.
+    """
+    logger = MPLogger('Score Worker', logging.INFO, id=split_id, loop_report_time=60)
+    all_scores_dict = {}
+    scores_dict = {}
+    logger.initialize_loop_reporting()
+    for i, data_idx in enumerate(row_indices):
+        # Calculate scores and store
+        scores, store, all_scores_dict = BKBGobnilpBackend.calculate_local_score_static(
+                data_idx,
+                data_id,
+                feature_states_id,
+                palim,
+                score_node,
+                feature_states_index_map_id,
+                store=store,
+                only=only,
+                all_scores=all_scores_dict,
+                )
+        logger.report(i=i, total=len(row_indices))
+        scores_dict[data_idx] = scores
+    # Put them in the object store
+    logger.info('Finished calculating scores.')
+    return scores_dict, store['__ncalls__'], store['__nhashlookups__']
+
+@ray.remote(num_returns=3)
+def calculate_local_score(
+        data_idx,
+        data_id,
+        feature_states_id,
+        palim,
+        score_node,
+        feature_states_index_map_id,
+        store,
+        ):
+    """ Gobnilp local score wrapper for ray workflow.
+    """
+    # Calculate scores and store
+    scores, store, _ = BKBGobnilpBackend.calculate_local_score_static(
+            data_idx,
+            data_id,
+            feature_states_id,
+            palim,
+            score_node,
+            feature_states_index_map_id,
+            store=store,
+            only=only,
+            )
+    # Put them in the object store
+    return scores, store['__ncalls__'], store['__nhashlookups__']
+
+@ray.remote(num_cpus=1)
+def learn_bkf_structures_and_scores(
+        row_indices,
+        palim,
+        data_id,
+        data_eff_id,
+        feature_states_id,
+        feature_states_index_map_id,
+        split_id,
+        save_bkf_dir,
+        score_node,
+        only,
+        nsols,
+        kbest,
+        mec,
+        pruning,
+        num_workers,
+        ):
+    bkf_objs, learn_times = [], []
+    logger = MPLogger('Learning Worker', logging.DEBUG, id=split_id, loop_report_time=60)
+    logger.info(f'Starting to learn on {len(row_indices)} examples.')
+    logger.initialize_loop_reporting()
+    store = build_probability_store()
+    all_scores_dict = {}
+    pool = Pool(num_workers)
+    for i, row_idx in enumerate(row_indices):
+        # Calculate scores and store
+        start_time = time.time()
+        logger.debug('Scoring example.')
+        scores, store, all_scores_dict = BKBGobnilpBackend.calculate_local_score_static(
+                row_idx,
+                data_id,
+                data_eff_id,
+                feature_states_id,
+                palim,
+                score_node,
+                feature_states_index_map_id,
+                store=store,
+                only=only,
+                all_scores=all_scores_dict,
+                num_workers=num_workers,
+                logger=logger,
+                pool=pool,
+                )
+        logger.debug(f'Calculated scores in {time.time() - start_time} seconds.')
+        logger.debug('Starting to learn on example.')
+        # Learn BKF
+        f = open(os.devnull, 'w')
+        with contextlib.redirect_stdout(f):
+            m = Gobnilp()
+            # Start the learning but stop before learning to add constraints
+            m.learn(local_scores_source=scores, end='MIP model', nsols=nsols, kbest=kbest, mec=mec, pruning=pruning)
+            # Grab all the adjacency variables
+            adj = [v for p, v in m.adjacency.items()]
+            # Add a constraint that at the DAG must be connected
+            m.addConstr(sum(adj), GRB.GREATER_EQUAL, np.sum(data_id[row_idx,:]) - 1)
+        # Close devnull file as to not get resource warning
+        f.close()
+        # Learn the DAG
+        start_time = time.time()
+        m.learn(local_scores_source=scores, start='MIP model')
+        learn_time = time.time() - start_time
+        # Convert learned DAG to BKF (learned_bn of gobnilp is a subclass of networkx.DiGraph)
+        bkfs = BKBGobnilpBackend.convert_dags_to_bkf(
+                m.learned_bns,
+                m.learned_scores,
+                str(row_idx),
+                data_id,
+                feature_states_id,
+                feature_states_index_map_id,
+                store=store,
+                )
+        if save_bkf_dir is not None:
+            for i, bkf in enumerate(bkfs):
+                bkf.save(os.path.join(save_bkf_dir, f'learned-bkf-{bkf.name}-{i}.bkb'))
+            continue
+        bkfs_dumps = []
+        for i, bkf in enumerate(bkfs):
+            bkfs_dumps.append(bkf.dumps())
+        # Transmit BKF efficiently using inherent numpy representation and reload on other end
+        bkf_objs.append(bkfs_dumps)
+        learn_times.append(learn_time)
+        logger.report(i=i, total=len(row_indices))
+    pool.close()
+    pool.join()
+    logger.info('Finished learning.')
+    if save_bkf_dir:
+        logger.info('Since bkf save directory was passed, bkfs will not be passed to main process to be fused.')
+        return None
+    return (bkf_objs, learn_times)
+
+@ray.remote(num_cpus=1)
+def learn_bkf_structures(
+        row_indices,
+        score_keeper,
+        palim,
+        data_id,
+        feature_states_id,
+        feature_states_index_map_id,
+        store_id,
+        split_id,
+        nsols,
+        kbest,
+        mec,
+        pruning,
+        ):
+    bkf_objs, learn_times = [], []
+    logger = MPLogger('Learning Worker', logging.INFO, id=split_id, loop_report_time=60)
+    logger.info('Collecting to scores.')
+    logger.initialize_loop_reporting()
+    row_scores = {}
+    all_scores = {}
+    for j, row_idx in enumerate(row_indices):
+        # Collect necessary scores for this example
+        fs_indices = data_id[row_idx].nonzero()[0] #np.argwhere(row == 1).flatten()
+        needed_scores = set()
+        for fs_idx in fs_indices:
+            for i in range(palim + 1):
+                #try:
+                # No parent set score
+                if i == 0:
+                    needed_scores.add((fs_idx, frozenset()))
+                    continue
+                # For non empty parent sets
+                for pa_set in itertools.combinations(set.difference(set(fs_indices), {fs_idx}), r=i):
+                    needed_scores.add((fs_idx, frozenset(pa_set)))
+        # First see if we can collect scores that have alreay been retrieved
+        scores = {}
+        ray_needed_scores = []
+        for x, pa in needed_scores:
+            try:
+                pa_str = frozenset([str(y) for y in pa])
+                scores[(str(x), pa_str)] = all_scores[(str(x), pa_str)]
+            except KeyError:
+                ray_needed_scores.append((x, pa))
+        # Anything we haven't already retrieved, now retrieve by grabbing them all from score keeper
+        ray_scores = score_keeper.get_scores(ray_needed_scores)
+        # Merge these two together
+        scores.update(ray_scores)
+        all_scores.update(ray_scores)
+        # Put into correct nested format
+        formatted_scores = defaultdict(dict)
+        for (x, pa), score in scores.items():
+            formatted_scores[x][pa] = score
+        row_scores[row_idx] = dict(formatted_scores)
+        logger.report(i=j, total=len(row_indices))
+    logger.info('Starting to learn.')
+    logger.initialize_loop_reporting()
+    model_strings = {}
+    for i, (row_idx, scores) in enumerate(row_scores.items()):
+        # Learn BKF
+        f = open(os.devnull, 'w')
+        with contextlib.redirect_stdout(f):
+            m = Gobnilp()
+            # Start the learning but stop before learning to add constraints
+            m.learn(local_scores_source=scores, end='MIP model', nsols=nsols, kbest=kbest, mec=mec, pruning=pruning)
+            # Grab all the adjacency variables
+            adj = [v for p, v in m.adjacency.items()]
+            # Add a constraint that at the DAG must be connected
+            m.addConstr(sum(adj), GRB.GREATER_EQUAL, np.sum(data_id[row_idx,:]) - 1)
+        # Close devnull file as to not get resource warning
+        f.close()
+        # Learn the DAG
+        start_time = time.time()
+        m.learn(local_scores_source=scores, start='MIP model')
+        learn_time = time.time() - start_time
+        # Convert learned DAG to BKF (learned_bn of gobnilp is a subclass of networkx.DiGraph)
+        bkfs = BKBGobnilpBackend.convert_dags_to_bkf(
+                m.learned_bns,
+                m.learned_scores,
+                str(row_idx),
+                data_id,
+                feature_states_id,
+                feature_states_index_map_id,
+                store=store_id,
+                )
+        bkfs_dumps = [bkf.dumps() for bkf in bkfs]
+        #print(row_idx, scores)
+        #print(row_idx, m.learned_bn.bnlearn_modelstring())
+        #model_strings[row_idx] = m.learned_bn.bnlearn_modelstring()
+        # Transmit BKF efficiently using inherent numpy representation and reload on other end
+        bkf_objs.append(bkfs_dumps)
+        learn_times.append(learn_time)
+        logger.report(i=i, total=len(row_indices))
+    logger.info('Finished learning.')
+    return (bkf_objs, learn_times)
+
+@ray.remote(num_cpus=1)
+def learn_bkf_structure(
+        data_idx,
+        score_id,
+        data_id,
+        feature_states_id,
+        feature_states_index_map_id,
+        store_id,
+        ):
+    # Learn the best DAG from these local scores using Gobnilp
+    # Redirect output so we don't have to see this
+    f = open(os.devnull, 'w')
+    with contextlib.redirect_stdout(f):
+        m = Gobnilp()
+        # Start the learning but stop before learning to add constraints
+        m.learn(local_scores_source=score_id, end='MIP model')
+        # Grab all the adjacency variables
+        adj = [v for p, v in m.adjacency.items()]
+        # Add a constraint that at the DAG must be connected
+        m.addConstr(sum(adj), GRB.GREATER_EQUAL, np.sum(data_id[data_idx,:]) - 1)
+    # Close devnull file as to not get resource warning
+    f.close()
+    # Learn the DAG
+    start_time = time.time()
+    m.learn(local_scores_source=score_id, start='MIP model')
+    learn_time = time.time() - start_time
+    # Convert learned DAG to BKF (learned_bn of gobnilp is a subclass of networkx.DiGraph)
+    bkf = BKBGobnilpBackend.convert_dag_to_bkf(
+            m.learned_bn,
+            str(data_idx),
+            data_id,
+            feature_states_id,
+            feature_states_index_map_id,
+            store=store_id,
+            )
+    # Transmit BKF efficiently using inherent numpy representation and reload on other end
+    return (bkf.dumps(), learn_time)

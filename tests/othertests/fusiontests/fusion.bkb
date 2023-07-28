@@ -1,0 +1,964 @@
+COMPONENTS: 46
+36 (B) Has (access to) a (fishing) boat
+	STATES: 2
+		2 No
+		3 Yes
+47 _Source_[(B) Has (access to) a (fishing) boat]_
+	STATES: 1
+		13 [1]_Fisherman
+22 (B) Fishing cost is ok
+	STATES: 2
+		2 No
+		3 Yes
+33 _Source_[(B) Fishing cost is ok]_
+	STATES: 1
+		13 [1]_Fisherman
+19 (B) Has fishing net
+	STATES: 2
+		2 No
+		3 Yes
+30 _Source_[(B) Has fishing net]_
+	STATES: 1
+		13 [1]_Fisherman
+25 (G) Livelihood is fishing
+	STATES: 2
+		2 No
+		3 Yes
+36 _Source_[(G) Livelihood is fishing]_
+	STATES: 1
+		13 [1]_Fisherman
+29 (B) Fish supply is sufficient
+	STATES: 2
+		3 Yes
+		2 No
+40 _Source_[(B) Fish supply is sufficient]_
+	STATES: 3
+		13 [1]_Fisherman
+		23 [2]_IllegalFishingEvent
+		23 [3]_IllegalDumpingEvent
+25 (B) Fishing benefit is ok
+	STATES: 2
+		2 No
+		3 Yes
+36 _Source_[(B) Fishing benefit is ok]_
+	STATES: 1
+		13 [1]_Fisherman
+20 (X) Seafaring skills
+	STATES: 2
+		2 No
+		3 Yes
+31 _Source_[(X) Seafaring skills]_
+	STATES: 2
+		13 [1]_Fisherman
+		10 [4]_Pirate
+22 (B) Has fishing skills
+	STATES: 2
+		2 No
+		3 Yes
+33 _Source_[(B) Has fishing skills]_
+	STATES: 1
+		13 [1]_Fisherman
+25 (B) Has fishing equipment
+	STATES: 2
+		2 No
+		3 Yes
+36 _Source_[(B) Has fishing equipment]_
+	STATES: 1
+		13 [1]_Fisherman
+32 (B) Illegal fishing has occurred
+	STATES: 2
+		3 Yes
+		2 No
+43 _Source_[(B) Illegal fishing has occurred]_
+	STATES: 2
+		23 [2]_IllegalFishingEvent
+		23 [3]_IllegalDumpingEvent
+34 (B) Boarding skills are obtainable
+	STATES: 2
+		3 Yes
+		2 No
+45 _Source_[(B) Boarding skills are obtainable]_
+	STATES: 2
+		23 [2]_IllegalFishingEvent
+		23 [3]_IllegalDumpingEvent
+36 (B) Fishing livelihood is threatened
+	STATES: 2
+		3 Yes
+		2 No
+47 _Source_[(B) Fishing livelihood is threatened]_
+	STATES: 2
+		23 [2]_IllegalFishingEvent
+		23 [3]_IllegalDumpingEvent
+19 (X) Boarding skills
+	STATES: 2
+		3 Yes
+		2 No
+30 _Source_[(X) Boarding skills]_
+	STATES: 3
+		23 [2]_IllegalFishingEvent
+		23 [3]_IllegalDumpingEvent
+		10 [4]_Pirate
+27 (B) Attitude towards piracy
+	STATES: 2
+		8 Negative
+		8 Positive
+38 _Source_[(B) Attitude towards piracy]_
+	STATES: 3
+		23 [2]_IllegalFishingEvent
+		23 [3]_IllegalDumpingEvent
+		10 [4]_Pirate
+21 (B) Survival is moral
+	STATES: 2
+		3 Yes
+		2 No
+32 _Source_[(B) Survival is moral]_
+	STATES: 2
+		23 [2]_IllegalFishingEvent
+		23 [3]_IllegalDumpingEvent
+20 (B) Revenge is moral
+	STATES: 2
+		3 Yes
+		2 No
+31 _Source_[(B) Revenge is moral]_
+	STATES: 2
+		23 [2]_IllegalFishingEvent
+		23 [3]_IllegalDumpingEvent
+24 (G) Livelihood is piracy
+	STATES: 2
+		2 No
+		3 Yes
+35 _Source_[(G) Livelihood is piracy]_
+	STATES: 1
+		10 [4]_Pirate
+26 (B) Weapons are obtainable
+	STATES: 2
+		2 No
+		3 Yes
+37 _Source_[(B) Weapons are obtainable]_
+	STATES: 1
+		10 [4]_Pirate
+24 (B) Piracy benefit is ok
+	STATES: 2
+		2 No
+		3 Yes
+35 _Source_[(B) Piracy benefit is ok]_
+	STATES: 1
+		10 [4]_Pirate
+24 (B) Has piracy equipment
+	STATES: 2
+		2 No
+		3 Yes
+35 _Source_[(B) Has piracy equipment]_
+	STATES: 1
+		10 [4]_Pirate
+21 (B) Has piracy skills
+	STATES: 2
+		2 No
+		3 Yes
+32 _Source_[(B) Has piracy skills]_
+	STATES: 1
+		10 [4]_Pirate
+15 (B) Has a skiff
+	STATES: 2
+		2 No
+		3 Yes
+26 _Source_[(B) Has a skiff]_
+	STATES: 1
+		10 [4]_Pirate
+21 (B) Piracy cost is ok
+	STATES: 2
+		2 No
+		3 Yes
+32 _Source_[(B) Piracy cost is ok]_
+	STATES: 1
+		10 [4]_Pirate
+36 (B) Has (access to) a (fishing) boat
+	2 No
+		SUPPORTS: 1
+			0.01 TAIL: 1
+				47 _Source_[(B) Has (access to) a (fishing) boat]_ 13 [1]_Fisherman
+	3 Yes
+		SUPPORTS: 1
+			0.99 TAIL: 1
+				47 _Source_[(B) Has (access to) a (fishing) boat]_ 13 [1]_Fisherman
+47 _Source_[(B) Has (access to) a (fishing) boat]_
+	13 [1]_Fisherman
+		SUPPORTS: 1
+			1.0 TAIL: 0
+22 (B) Fishing cost is ok
+	2 No
+		SUPPORTS: 4
+			0.001 TAIL: 3
+				25 (B) Has fishing equipment 3 Yes
+				22 (B) Has fishing skills 3 Yes
+				33 _Source_[(B) Fishing cost is ok]_ 13 [1]_Fisherman
+			0.6 TAIL: 3
+				25 (B) Has fishing equipment 2 No
+				22 (B) Has fishing skills 3 Yes
+				33 _Source_[(B) Fishing cost is ok]_ 13 [1]_Fisherman
+			0.3 TAIL: 3
+				22 (B) Has fishing skills 2 No
+				25 (B) Has fishing equipment 3 Yes
+				33 _Source_[(B) Fishing cost is ok]_ 13 [1]_Fisherman
+			0.999 TAIL: 3
+				25 (B) Has fishing equipment 2 No
+				22 (B) Has fishing skills 2 No
+				33 _Source_[(B) Fishing cost is ok]_ 13 [1]_Fisherman
+	3 Yes
+		SUPPORTS: 4
+			0.4 TAIL: 3
+				25 (B) Has fishing equipment 2 No
+				22 (B) Has fishing skills 3 Yes
+				33 _Source_[(B) Fishing cost is ok]_ 13 [1]_Fisherman
+			0.7 TAIL: 3
+				25 (B) Has fishing equipment 3 Yes
+				22 (B) Has fishing skills 2 No
+				33 _Source_[(B) Fishing cost is ok]_ 13 [1]_Fisherman
+			0.001 TAIL: 3
+				22 (B) Has fishing skills 2 No
+				25 (B) Has fishing equipment 2 No
+				33 _Source_[(B) Fishing cost is ok]_ 13 [1]_Fisherman
+			0.999 TAIL: 3
+				25 (B) Has fishing equipment 3 Yes
+				22 (B) Has fishing skills 3 Yes
+				33 _Source_[(B) Fishing cost is ok]_ 13 [1]_Fisherman
+33 _Source_[(B) Fishing cost is ok]_
+	13 [1]_Fisherman
+		SUPPORTS: 1
+			1.0 TAIL: 0
+19 (B) Has fishing net
+	2 No
+		SUPPORTS: 1
+			0.01 TAIL: 1
+				30 _Source_[(B) Has fishing net]_ 13 [1]_Fisherman
+	3 Yes
+		SUPPORTS: 1
+			0.99 TAIL: 1
+				30 _Source_[(B) Has fishing net]_ 13 [1]_Fisherman
+30 _Source_[(B) Has fishing net]_
+	13 [1]_Fisherman
+		SUPPORTS: 1
+			1.0 TAIL: 0
+25 (G) Livelihood is fishing
+	2 No
+		SUPPORTS: 4
+			0.001 TAIL: 3
+				25 (B) Fishing benefit is ok 3 Yes
+				22 (B) Fishing cost is ok 3 Yes
+				36 _Source_[(G) Livelihood is fishing]_ 13 [1]_Fisherman
+			0.6 TAIL: 3
+				25 (B) Fishing benefit is ok 3 Yes
+				22 (B) Fishing cost is ok 2 No
+				36 _Source_[(G) Livelihood is fishing]_ 13 [1]_Fisherman
+			0.9 TAIL: 3
+				22 (B) Fishing cost is ok 2 No
+				25 (B) Fishing benefit is ok 2 No
+				36 _Source_[(G) Livelihood is fishing]_ 13 [1]_Fisherman
+			0.2 TAIL: 3
+				22 (B) Fishing cost is ok 3 Yes
+				25 (B) Fishing benefit is ok 2 No
+				36 _Source_[(G) Livelihood is fishing]_ 13 [1]_Fisherman
+	3 Yes
+		SUPPORTS: 4
+			0.4 TAIL: 3
+				25 (B) Fishing benefit is ok 3 Yes
+				22 (B) Fishing cost is ok 2 No
+				36 _Source_[(G) Livelihood is fishing]_ 13 [1]_Fisherman
+			0.1 TAIL: 3
+				25 (B) Fishing benefit is ok 2 No
+				22 (B) Fishing cost is ok 2 No
+				36 _Source_[(G) Livelihood is fishing]_ 13 [1]_Fisherman
+			0.8 TAIL: 3
+				25 (B) Fishing benefit is ok 2 No
+				22 (B) Fishing cost is ok 3 Yes
+				36 _Source_[(G) Livelihood is fishing]_ 13 [1]_Fisherman
+			0.999 TAIL: 3
+				25 (B) Fishing benefit is ok 3 Yes
+				22 (B) Fishing cost is ok 3 Yes
+				36 _Source_[(G) Livelihood is fishing]_ 13 [1]_Fisherman
+36 _Source_[(G) Livelihood is fishing]_
+	13 [1]_Fisherman
+		SUPPORTS: 1
+			1.0 TAIL: 0
+29 (B) Fish supply is sufficient
+	3 Yes
+		SUPPORTS: 5
+			0.25 TAIL: 2
+				32 (B) Illegal fishing has occurred 3 Yes
+				40 _Source_[(B) Fish supply is sufficient]_ 23 [2]_IllegalFishingEvent
+			0.97 TAIL: 1
+				40 _Source_[(B) Fish supply is sufficient]_ 13 [1]_Fisherman
+			0.75 TAIL: 2
+				32 (B) Illegal fishing has occurred 2 No
+				40 _Source_[(B) Fish supply is sufficient]_ 23 [3]_IllegalDumpingEvent
+			0.35 TAIL: 2
+				32 (B) Illegal fishing has occurred 3 Yes
+				40 _Source_[(B) Fish supply is sufficient]_ 23 [3]_IllegalDumpingEvent
+			0.75 TAIL: 2
+				32 (B) Illegal fishing has occurred 2 No
+				40 _Source_[(B) Fish supply is sufficient]_ 23 [2]_IllegalFishingEvent
+	2 No
+		SUPPORTS: 5
+			0.75 TAIL: 2
+				32 (B) Illegal fishing has occurred 3 Yes
+				40 _Source_[(B) Fish supply is sufficient]_ 23 [2]_IllegalFishingEvent
+			0.03 TAIL: 1
+				40 _Source_[(B) Fish supply is sufficient]_ 13 [1]_Fisherman
+			0.25 TAIL: 2
+				32 (B) Illegal fishing has occurred 2 No
+				40 _Source_[(B) Fish supply is sufficient]_ 23 [2]_IllegalFishingEvent
+			0.25 TAIL: 2
+				32 (B) Illegal fishing has occurred 2 No
+				40 _Source_[(B) Fish supply is sufficient]_ 23 [3]_IllegalDumpingEvent
+			0.65 TAIL: 2
+				32 (B) Illegal fishing has occurred 3 Yes
+				40 _Source_[(B) Fish supply is sufficient]_ 23 [3]_IllegalDumpingEvent
+40 _Source_[(B) Fish supply is sufficient]_
+	13 [1]_Fisherman
+		SUPPORTS: 1
+			0.3333333333333333 TAIL: 0
+	23 [2]_IllegalFishingEvent
+		SUPPORTS: 1
+			0.5333333333333333 TAIL: 0
+	23 [3]_IllegalDumpingEvent
+		SUPPORTS: 1
+			0.13333333333333333 TAIL: 0
+25 (B) Fishing benefit is ok
+	2 No
+		SUPPORTS: 2
+			0.0 TAIL: 2
+				29 (B) Fish supply is sufficient 3 Yes
+				36 _Source_[(B) Fishing benefit is ok]_ 13 [1]_Fisherman
+			1.0 TAIL: 2
+				29 (B) Fish supply is sufficient 2 No
+				36 _Source_[(B) Fishing benefit is ok]_ 13 [1]_Fisherman
+	3 Yes
+		SUPPORTS: 2
+			1.0 TAIL: 2
+				29 (B) Fish supply is sufficient 3 Yes
+				36 _Source_[(B) Fishing benefit is ok]_ 13 [1]_Fisherman
+			0.0 TAIL: 2
+				29 (B) Fish supply is sufficient 2 No
+				36 _Source_[(B) Fishing benefit is ok]_ 13 [1]_Fisherman
+36 _Source_[(B) Fishing benefit is ok]_
+	13 [1]_Fisherman
+		SUPPORTS: 1
+			1.0 TAIL: 0
+20 (X) Seafaring skills
+	2 No
+		SUPPORTS: 2
+			0.1 TAIL: 1
+				31 _Source_[(X) Seafaring skills]_ 10 [4]_Pirate
+			0.001 TAIL: 1
+				31 _Source_[(X) Seafaring skills]_ 13 [1]_Fisherman
+	3 Yes
+		SUPPORTS: 2
+			0.999 TAIL: 1
+				31 _Source_[(X) Seafaring skills]_ 13 [1]_Fisherman
+			0.9 TAIL: 1
+				31 _Source_[(X) Seafaring skills]_ 10 [4]_Pirate
+31 _Source_[(X) Seafaring skills]_
+	13 [1]_Fisherman
+		SUPPORTS: 1
+			0.625 TAIL: 0
+	10 [4]_Pirate
+		SUPPORTS: 1
+			0.37499999999999994 TAIL: 0
+22 (B) Has fishing skills
+	2 No
+		SUPPORTS: 1
+			1.0 TAIL: 2
+				20 (X) Seafaring skills 2 No
+				33 _Source_[(B) Has fishing skills]_ 13 [1]_Fisherman
+	3 Yes
+		SUPPORTS: 1
+			1.0 TAIL: 2
+				20 (X) Seafaring skills 3 Yes
+				33 _Source_[(B) Has fishing skills]_ 13 [1]_Fisherman
+33 _Source_[(B) Has fishing skills]_
+	13 [1]_Fisherman
+		SUPPORTS: 1
+			1.0 TAIL: 0
+25 (B) Has fishing equipment
+	2 No
+		SUPPORTS: 4
+			0.75 TAIL: 3
+				36 (B) Has (access to) a (fishing) boat 2 No
+				19 (B) Has fishing net 3 Yes
+				36 _Source_[(B) Has fishing equipment]_ 13 [1]_Fisherman
+			0.999 TAIL: 3
+				36 (B) Has (access to) a (fishing) boat 2 No
+				19 (B) Has fishing net 2 No
+				36 _Source_[(B) Has fishing equipment]_ 13 [1]_Fisherman
+			0.25 TAIL: 3
+				36 (B) Has (access to) a (fishing) boat 3 Yes
+				19 (B) Has fishing net 2 No
+				36 _Source_[(B) Has fishing equipment]_ 13 [1]_Fisherman
+			0.001 TAIL: 3
+				36 (B) Has (access to) a (fishing) boat 3 Yes
+				19 (B) Has fishing net 3 Yes
+				36 _Source_[(B) Has fishing equipment]_ 13 [1]_Fisherman
+	3 Yes
+		SUPPORTS: 4
+			0.75 TAIL: 3
+				19 (B) Has fishing net 2 No
+				36 (B) Has (access to) a (fishing) boat 3 Yes
+				36 _Source_[(B) Has fishing equipment]_ 13 [1]_Fisherman
+			0.25 TAIL: 3
+				19 (B) Has fishing net 3 Yes
+				36 (B) Has (access to) a (fishing) boat 2 No
+				36 _Source_[(B) Has fishing equipment]_ 13 [1]_Fisherman
+			0.999 TAIL: 3
+				36 (B) Has (access to) a (fishing) boat 3 Yes
+				19 (B) Has fishing net 3 Yes
+				36 _Source_[(B) Has fishing equipment]_ 13 [1]_Fisherman
+			0.001 TAIL: 3
+				19 (B) Has fishing net 2 No
+				36 (B) Has (access to) a (fishing) boat 2 No
+				36 _Source_[(B) Has fishing equipment]_ 13 [1]_Fisherman
+36 _Source_[(B) Has fishing equipment]_
+	13 [1]_Fisherman
+		SUPPORTS: 1
+			1.0 TAIL: 0
+32 (B) Illegal fishing has occurred
+	3 Yes
+		SUPPORTS: 2
+			0.75 TAIL: 1
+				43 _Source_[(B) Illegal fishing has occurred]_ 23 [3]_IllegalDumpingEvent
+			1.0 TAIL: 1
+				43 _Source_[(B) Illegal fishing has occurred]_ 23 [2]_IllegalFishingEvent
+	2 No
+		SUPPORTS: 2
+			0.0 TAIL: 1
+				43 _Source_[(B) Illegal fishing has occurred]_ 23 [2]_IllegalFishingEvent
+			0.25 TAIL: 1
+				43 _Source_[(B) Illegal fishing has occurred]_ 23 [3]_IllegalDumpingEvent
+43 _Source_[(B) Illegal fishing has occurred]_
+	23 [2]_IllegalFishingEvent
+		SUPPORTS: 1
+			0.8 TAIL: 0
+	23 [3]_IllegalDumpingEvent
+		SUPPORTS: 1
+			0.2 TAIL: 0
+34 (B) Boarding skills are obtainable
+	3 Yes
+		SUPPORTS: 4
+			0.1 TAIL: 2
+				32 (B) Illegal fishing has occurred 2 No
+				45 _Source_[(B) Boarding skills are obtainable]_ 23 [2]_IllegalFishingEvent
+			0.3 TAIL: 2
+				32 (B) Illegal fishing has occurred 2 No
+				45 _Source_[(B) Boarding skills are obtainable]_ 23 [3]_IllegalDumpingEvent
+			0.65 TAIL: 2
+				32 (B) Illegal fishing has occurred 3 Yes
+				45 _Source_[(B) Boarding skills are obtainable]_ 23 [2]_IllegalFishingEvent
+			0.65 TAIL: 2
+				32 (B) Illegal fishing has occurred 3 Yes
+				45 _Source_[(B) Boarding skills are obtainable]_ 23 [3]_IllegalDumpingEvent
+	2 No
+		SUPPORTS: 4
+			0.35 TAIL: 2
+				32 (B) Illegal fishing has occurred 3 Yes
+				45 _Source_[(B) Boarding skills are obtainable]_ 23 [3]_IllegalDumpingEvent
+			0.9 TAIL: 2
+				32 (B) Illegal fishing has occurred 2 No
+				45 _Source_[(B) Boarding skills are obtainable]_ 23 [2]_IllegalFishingEvent
+			0.35 TAIL: 2
+				32 (B) Illegal fishing has occurred 3 Yes
+				45 _Source_[(B) Boarding skills are obtainable]_ 23 [2]_IllegalFishingEvent
+			0.7 TAIL: 2
+				32 (B) Illegal fishing has occurred 2 No
+				45 _Source_[(B) Boarding skills are obtainable]_ 23 [3]_IllegalDumpingEvent
+45 _Source_[(B) Boarding skills are obtainable]_
+	23 [2]_IllegalFishingEvent
+		SUPPORTS: 1
+			0.8 TAIL: 0
+	23 [3]_IllegalDumpingEvent
+		SUPPORTS: 1
+			0.2 TAIL: 0
+36 (B) Fishing livelihood is threatened
+	3 Yes
+		SUPPORTS: 4
+			0.4 TAIL: 2
+				29 (B) Fish supply is sufficient 3 Yes
+				47 _Source_[(B) Fishing livelihood is threatened]_ 23 [3]_IllegalDumpingEvent
+			0.4 TAIL: 2
+				29 (B) Fish supply is sufficient 3 Yes
+				47 _Source_[(B) Fishing livelihood is threatened]_ 23 [2]_IllegalFishingEvent
+			0.8 TAIL: 2
+				29 (B) Fish supply is sufficient 2 No
+				47 _Source_[(B) Fishing livelihood is threatened]_ 23 [2]_IllegalFishingEvent
+			0.8 TAIL: 2
+				29 (B) Fish supply is sufficient 2 No
+				47 _Source_[(B) Fishing livelihood is threatened]_ 23 [3]_IllegalDumpingEvent
+	2 No
+		SUPPORTS: 4
+			0.2 TAIL: 2
+				29 (B) Fish supply is sufficient 2 No
+				47 _Source_[(B) Fishing livelihood is threatened]_ 23 [2]_IllegalFishingEvent
+			0.2 TAIL: 2
+				29 (B) Fish supply is sufficient 2 No
+				47 _Source_[(B) Fishing livelihood is threatened]_ 23 [3]_IllegalDumpingEvent
+			0.6 TAIL: 2
+				29 (B) Fish supply is sufficient 3 Yes
+				47 _Source_[(B) Fishing livelihood is threatened]_ 23 [2]_IllegalFishingEvent
+			0.6 TAIL: 2
+				29 (B) Fish supply is sufficient 3 Yes
+				47 _Source_[(B) Fishing livelihood is threatened]_ 23 [3]_IllegalDumpingEvent
+47 _Source_[(B) Fishing livelihood is threatened]_
+	23 [2]_IllegalFishingEvent
+		SUPPORTS: 1
+			0.8 TAIL: 0
+	23 [3]_IllegalDumpingEvent
+		SUPPORTS: 1
+			0.2 TAIL: 0
+19 (X) Boarding skills
+	3 Yes
+		SUPPORTS: 5
+			0.05 TAIL: 2
+				34 (B) Boarding skills are obtainable 2 No
+				30 _Source_[(X) Boarding skills]_ 23 [2]_IllegalFishingEvent
+			0.05 TAIL: 2
+				34 (B) Boarding skills are obtainable 2 No
+				30 _Source_[(X) Boarding skills]_ 23 [3]_IllegalDumpingEvent
+			0.05 TAIL: 1
+				30 _Source_[(X) Boarding skills]_ 10 [4]_Pirate
+			0.75 TAIL: 2
+				34 (B) Boarding skills are obtainable 3 Yes
+				30 _Source_[(X) Boarding skills]_ 23 [2]_IllegalFishingEvent
+			0.75 TAIL: 2
+				34 (B) Boarding skills are obtainable 3 Yes
+				30 _Source_[(X) Boarding skills]_ 23 [3]_IllegalDumpingEvent
+	2 No
+		SUPPORTS: 5
+			0.25 TAIL: 2
+				34 (B) Boarding skills are obtainable 3 Yes
+				30 _Source_[(X) Boarding skills]_ 23 [2]_IllegalFishingEvent
+			0.95 TAIL: 2
+				34 (B) Boarding skills are obtainable 2 No
+				30 _Source_[(X) Boarding skills]_ 23 [3]_IllegalDumpingEvent
+			0.95 TAIL: 1
+				30 _Source_[(X) Boarding skills]_ 10 [4]_Pirate
+			0.95 TAIL: 2
+				34 (B) Boarding skills are obtainable 2 No
+				30 _Source_[(X) Boarding skills]_ 23 [2]_IllegalFishingEvent
+			0.25 TAIL: 2
+				34 (B) Boarding skills are obtainable 3 Yes
+				30 _Source_[(X) Boarding skills]_ 23 [3]_IllegalDumpingEvent
+30 _Source_[(X) Boarding skills]_
+	23 [2]_IllegalFishingEvent
+		SUPPORTS: 1
+			0.6153846153846154 TAIL: 0
+	23 [3]_IllegalDumpingEvent
+		SUPPORTS: 1
+			0.15384615384615385 TAIL: 0
+	10 [4]_Pirate
+		SUPPORTS: 1
+			0.23076923076923075 TAIL: 0
+27 (B) Attitude towards piracy
+	8 Negative
+		SUPPORTS: 9
+			0.2 TAIL: 3
+				21 (B) Survival is moral 3 Yes
+				20 (B) Revenge is moral 3 Yes
+				38 _Source_[(B) Attitude towards piracy]_ 23 [3]_IllegalDumpingEvent
+			0.75 TAIL: 3
+				21 (B) Survival is moral 2 No
+				20 (B) Revenge is moral 2 No
+				38 _Source_[(B) Attitude towards piracy]_ 23 [2]_IllegalFishingEvent
+			0.99 TAIL: 1
+				38 _Source_[(B) Attitude towards piracy]_ 10 [4]_Pirate
+			0.4 TAIL: 3
+				20 (B) Revenge is moral 3 Yes
+				21 (B) Survival is moral 2 No
+				38 _Source_[(B) Attitude towards piracy]_ 23 [3]_IllegalDumpingEvent
+			0.3 TAIL: 3
+				20 (B) Revenge is moral 2 No
+				21 (B) Survival is moral 3 Yes
+				38 _Source_[(B) Attitude towards piracy]_ 23 [2]_IllegalFishingEvent
+			0.4 TAIL: 3
+				20 (B) Revenge is moral 3 Yes
+				21 (B) Survival is moral 2 No
+				38 _Source_[(B) Attitude towards piracy]_ 23 [2]_IllegalFishingEvent
+			0.75 TAIL: 3
+				21 (B) Survival is moral 2 No
+				20 (B) Revenge is moral 2 No
+				38 _Source_[(B) Attitude towards piracy]_ 23 [3]_IllegalDumpingEvent
+			0.3 TAIL: 3
+				20 (B) Revenge is moral 2 No
+				21 (B) Survival is moral 3 Yes
+				38 _Source_[(B) Attitude towards piracy]_ 23 [3]_IllegalDumpingEvent
+			0.2 TAIL: 3
+				21 (B) Survival is moral 3 Yes
+				20 (B) Revenge is moral 3 Yes
+				38 _Source_[(B) Attitude towards piracy]_ 23 [2]_IllegalFishingEvent
+	8 Positive
+		SUPPORTS: 9
+			0.6 TAIL: 3
+				20 (B) Revenge is moral 3 Yes
+				21 (B) Survival is moral 2 No
+				38 _Source_[(B) Attitude towards piracy]_ 23 [2]_IllegalFishingEvent
+			0.7 TAIL: 3
+				21 (B) Survival is moral 3 Yes
+				20 (B) Revenge is moral 2 No
+				38 _Source_[(B) Attitude towards piracy]_ 23 [3]_IllegalDumpingEvent
+			0.6 TAIL: 3
+				20 (B) Revenge is moral 3 Yes
+				21 (B) Survival is moral 2 No
+				38 _Source_[(B) Attitude towards piracy]_ 23 [3]_IllegalDumpingEvent
+			0.25 TAIL: 3
+				20 (B) Revenge is moral 2 No
+				21 (B) Survival is moral 2 No
+				38 _Source_[(B) Attitude towards piracy]_ 23 [3]_IllegalDumpingEvent
+			0.25 TAIL: 3
+				20 (B) Revenge is moral 2 No
+				21 (B) Survival is moral 2 No
+				38 _Source_[(B) Attitude towards piracy]_ 23 [2]_IllegalFishingEvent
+			0.8 TAIL: 3
+				21 (B) Survival is moral 3 Yes
+				20 (B) Revenge is moral 3 Yes
+				38 _Source_[(B) Attitude towards piracy]_ 23 [3]_IllegalDumpingEvent
+			0.7 TAIL: 3
+				21 (B) Survival is moral 3 Yes
+				20 (B) Revenge is moral 2 No
+				38 _Source_[(B) Attitude towards piracy]_ 23 [2]_IllegalFishingEvent
+			0.8 TAIL: 3
+				21 (B) Survival is moral 3 Yes
+				20 (B) Revenge is moral 3 Yes
+				38 _Source_[(B) Attitude towards piracy]_ 23 [2]_IllegalFishingEvent
+			0.01 TAIL: 1
+				38 _Source_[(B) Attitude towards piracy]_ 10 [4]_Pirate
+38 _Source_[(B) Attitude towards piracy]_
+	23 [2]_IllegalFishingEvent
+		SUPPORTS: 1
+			0.6153846153846154 TAIL: 0
+	23 [3]_IllegalDumpingEvent
+		SUPPORTS: 1
+			0.15384615384615385 TAIL: 0
+	10 [4]_Pirate
+		SUPPORTS: 1
+			0.23076923076923075 TAIL: 0
+21 (B) Survival is moral
+	3 Yes
+		SUPPORTS: 4
+			0.3 TAIL: 2
+				36 (B) Fishing livelihood is threatened 2 No
+				32 _Source_[(B) Survival is moral]_ 23 [2]_IllegalFishingEvent
+			0.75 TAIL: 2
+				36 (B) Fishing livelihood is threatened 3 Yes
+				32 _Source_[(B) Survival is moral]_ 23 [3]_IllegalDumpingEvent
+			0.75 TAIL: 2
+				36 (B) Fishing livelihood is threatened 3 Yes
+				32 _Source_[(B) Survival is moral]_ 23 [2]_IllegalFishingEvent
+			0.3 TAIL: 2
+				36 (B) Fishing livelihood is threatened 2 No
+				32 _Source_[(B) Survival is moral]_ 23 [3]_IllegalDumpingEvent
+	2 No
+		SUPPORTS: 4
+			0.7 TAIL: 2
+				36 (B) Fishing livelihood is threatened 2 No
+				32 _Source_[(B) Survival is moral]_ 23 [2]_IllegalFishingEvent
+			0.7 TAIL: 2
+				36 (B) Fishing livelihood is threatened 2 No
+				32 _Source_[(B) Survival is moral]_ 23 [3]_IllegalDumpingEvent
+			0.25 TAIL: 2
+				36 (B) Fishing livelihood is threatened 3 Yes
+				32 _Source_[(B) Survival is moral]_ 23 [2]_IllegalFishingEvent
+			0.25 TAIL: 2
+				36 (B) Fishing livelihood is threatened 3 Yes
+				32 _Source_[(B) Survival is moral]_ 23 [3]_IllegalDumpingEvent
+32 _Source_[(B) Survival is moral]_
+	23 [2]_IllegalFishingEvent
+		SUPPORTS: 1
+			0.8 TAIL: 0
+	23 [3]_IllegalDumpingEvent
+		SUPPORTS: 1
+			0.2 TAIL: 0
+20 (B) Revenge is moral
+	3 Yes
+		SUPPORTS: 4
+			0.3 TAIL: 2
+				36 (B) Fishing livelihood is threatened 2 No
+				31 _Source_[(B) Revenge is moral]_ 23 [2]_IllegalFishingEvent
+			0.3 TAIL: 2
+				36 (B) Fishing livelihood is threatened 2 No
+				31 _Source_[(B) Revenge is moral]_ 23 [3]_IllegalDumpingEvent
+			0.75 TAIL: 2
+				36 (B) Fishing livelihood is threatened 3 Yes
+				31 _Source_[(B) Revenge is moral]_ 23 [3]_IllegalDumpingEvent
+			0.75 TAIL: 2
+				36 (B) Fishing livelihood is threatened 3 Yes
+				31 _Source_[(B) Revenge is moral]_ 23 [2]_IllegalFishingEvent
+	2 No
+		SUPPORTS: 4
+			0.7 TAIL: 2
+				36 (B) Fishing livelihood is threatened 2 No
+				31 _Source_[(B) Revenge is moral]_ 23 [2]_IllegalFishingEvent
+			0.25 TAIL: 2
+				36 (B) Fishing livelihood is threatened 3 Yes
+				31 _Source_[(B) Revenge is moral]_ 23 [2]_IllegalFishingEvent
+			0.7 TAIL: 2
+				36 (B) Fishing livelihood is threatened 2 No
+				31 _Source_[(B) Revenge is moral]_ 23 [3]_IllegalDumpingEvent
+			0.25 TAIL: 2
+				36 (B) Fishing livelihood is threatened 3 Yes
+				31 _Source_[(B) Revenge is moral]_ 23 [3]_IllegalDumpingEvent
+31 _Source_[(B) Revenge is moral]_
+	23 [2]_IllegalFishingEvent
+		SUPPORTS: 1
+			0.8 TAIL: 0
+	23 [3]_IllegalDumpingEvent
+		SUPPORTS: 1
+			0.2 TAIL: 0
+24 (G) Livelihood is piracy
+	2 No
+		SUPPORTS: 8
+			0.3 TAIL: 4
+				21 (B) Piracy cost is ok 2 No
+				24 (B) Piracy benefit is ok 3 Yes
+				27 (B) Attitude towards piracy 8 Positive
+				35 _Source_[(G) Livelihood is piracy]_ 10 [4]_Pirate
+			0.999 TAIL: 4
+				27 (B) Attitude towards piracy 8 Negative
+				24 (B) Piracy benefit is ok 2 No
+				21 (B) Piracy cost is ok 2 No
+				35 _Source_[(G) Livelihood is piracy]_ 10 [4]_Pirate
+			0.05 TAIL: 4
+				21 (B) Piracy cost is ok 3 Yes
+				24 (B) Piracy benefit is ok 3 Yes
+				27 (B) Attitude towards piracy 8 Positive
+				35 _Source_[(G) Livelihood is piracy]_ 10 [4]_Pirate
+			0.5 TAIL: 4
+				24 (B) Piracy benefit is ok 2 No
+				21 (B) Piracy cost is ok 2 No
+				27 (B) Attitude towards piracy 8 Positive
+				35 _Source_[(G) Livelihood is piracy]_ 10 [4]_Pirate
+			0.6 TAIL: 4
+				24 (B) Piracy benefit is ok 2 No
+				27 (B) Attitude towards piracy 8 Positive
+				21 (B) Piracy cost is ok 3 Yes
+				35 _Source_[(G) Livelihood is piracy]_ 10 [4]_Pirate
+			0.995 TAIL: 4
+				24 (B) Piracy benefit is ok 3 Yes
+				21 (B) Piracy cost is ok 2 No
+				27 (B) Attitude towards piracy 8 Negative
+				35 _Source_[(G) Livelihood is piracy]_ 10 [4]_Pirate
+			0.95 TAIL: 4
+				27 (B) Attitude towards piracy 8 Negative
+				21 (B) Piracy cost is ok 3 Yes
+				24 (B) Piracy benefit is ok 3 Yes
+				35 _Source_[(G) Livelihood is piracy]_ 10 [4]_Pirate
+			0.995 TAIL: 4
+				21 (B) Piracy cost is ok 3 Yes
+				27 (B) Attitude towards piracy 8 Negative
+				24 (B) Piracy benefit is ok 2 No
+				35 _Source_[(G) Livelihood is piracy]_ 10 [4]_Pirate
+	3 Yes
+		SUPPORTS: 8
+			0.95 TAIL: 4
+				24 (B) Piracy benefit is ok 3 Yes
+				27 (B) Attitude towards piracy 8 Positive
+				21 (B) Piracy cost is ok 3 Yes
+				35 _Source_[(G) Livelihood is piracy]_ 10 [4]_Pirate
+			0.005 TAIL: 4
+				24 (B) Piracy benefit is ok 3 Yes
+				21 (B) Piracy cost is ok 2 No
+				27 (B) Attitude towards piracy 8 Negative
+				35 _Source_[(G) Livelihood is piracy]_ 10 [4]_Pirate
+			0.05 TAIL: 4
+				27 (B) Attitude towards piracy 8 Negative
+				21 (B) Piracy cost is ok 3 Yes
+				24 (B) Piracy benefit is ok 3 Yes
+				35 _Source_[(G) Livelihood is piracy]_ 10 [4]_Pirate
+			0.4 TAIL: 4
+				24 (B) Piracy benefit is ok 2 No
+				27 (B) Attitude towards piracy 8 Positive
+				21 (B) Piracy cost is ok 3 Yes
+				35 _Source_[(G) Livelihood is piracy]_ 10 [4]_Pirate
+			0.7 TAIL: 4
+				24 (B) Piracy benefit is ok 3 Yes
+				27 (B) Attitude towards piracy 8 Positive
+				21 (B) Piracy cost is ok 2 No
+				35 _Source_[(G) Livelihood is piracy]_ 10 [4]_Pirate
+			0.001 TAIL: 4
+				24 (B) Piracy benefit is ok 2 No
+				21 (B) Piracy cost is ok 2 No
+				27 (B) Attitude towards piracy 8 Negative
+				35 _Source_[(G) Livelihood is piracy]_ 10 [4]_Pirate
+			0.005 TAIL: 4
+				27 (B) Attitude towards piracy 8 Negative
+				21 (B) Piracy cost is ok 3 Yes
+				24 (B) Piracy benefit is ok 2 No
+				35 _Source_[(G) Livelihood is piracy]_ 10 [4]_Pirate
+			0.5 TAIL: 4
+				21 (B) Piracy cost is ok 2 No
+				27 (B) Attitude towards piracy 8 Positive
+				24 (B) Piracy benefit is ok 2 No
+				35 _Source_[(G) Livelihood is piracy]_ 10 [4]_Pirate
+35 _Source_[(G) Livelihood is piracy]_
+	10 [4]_Pirate
+		SUPPORTS: 1
+			1.0 TAIL: 0
+26 (B) Weapons are obtainable
+	2 No
+		SUPPORTS: 1
+			0.65 TAIL: 1
+				37 _Source_[(B) Weapons are obtainable]_ 10 [4]_Pirate
+	3 Yes
+		SUPPORTS: 1
+			0.35 TAIL: 1
+				37 _Source_[(B) Weapons are obtainable]_ 10 [4]_Pirate
+37 _Source_[(B) Weapons are obtainable]_
+	10 [4]_Pirate
+		SUPPORTS: 1
+			1.0 TAIL: 0
+24 (B) Piracy benefit is ok
+	2 No
+		SUPPORTS: 1
+			0.3 TAIL: 1
+				35 _Source_[(B) Piracy benefit is ok]_ 10 [4]_Pirate
+	3 Yes
+		SUPPORTS: 1
+			0.7 TAIL: 1
+				35 _Source_[(B) Piracy benefit is ok]_ 10 [4]_Pirate
+35 _Source_[(B) Piracy benefit is ok]_
+	10 [4]_Pirate
+		SUPPORTS: 1
+			1.0 TAIL: 0
+24 (B) Has piracy equipment
+	2 No
+		SUPPORTS: 4
+			0.6 TAIL: 3
+				26 (B) Weapons are obtainable 2 No
+				15 (B) Has a skiff 3 Yes
+				35 _Source_[(B) Has piracy equipment]_ 10 [4]_Pirate
+			0.05 TAIL: 3
+				26 (B) Weapons are obtainable 3 Yes
+				15 (B) Has a skiff 3 Yes
+				35 _Source_[(B) Has piracy equipment]_ 10 [4]_Pirate
+			0.99 TAIL: 3
+				26 (B) Weapons are obtainable 2 No
+				15 (B) Has a skiff 2 No
+				35 _Source_[(B) Has piracy equipment]_ 10 [4]_Pirate
+			0.4 TAIL: 3
+				15 (B) Has a skiff 2 No
+				26 (B) Weapons are obtainable 3 Yes
+				35 _Source_[(B) Has piracy equipment]_ 10 [4]_Pirate
+	3 Yes
+		SUPPORTS: 4
+			0.01 TAIL: 3
+				15 (B) Has a skiff 2 No
+				26 (B) Weapons are obtainable 2 No
+				35 _Source_[(B) Has piracy equipment]_ 10 [4]_Pirate
+			0.95 TAIL: 3
+				15 (B) Has a skiff 3 Yes
+				26 (B) Weapons are obtainable 3 Yes
+				35 _Source_[(B) Has piracy equipment]_ 10 [4]_Pirate
+			0.4 TAIL: 3
+				15 (B) Has a skiff 3 Yes
+				26 (B) Weapons are obtainable 2 No
+				35 _Source_[(B) Has piracy equipment]_ 10 [4]_Pirate
+			0.6 TAIL: 3
+				26 (B) Weapons are obtainable 3 Yes
+				15 (B) Has a skiff 2 No
+				35 _Source_[(B) Has piracy equipment]_ 10 [4]_Pirate
+35 _Source_[(B) Has piracy equipment]_
+	10 [4]_Pirate
+		SUPPORTS: 1
+			1.0 TAIL: 0
+21 (B) Has piracy skills
+	2 No
+		SUPPORTS: 4
+			0.5 TAIL: 3
+				20 (X) Seafaring skills 2 No
+				19 (X) Boarding skills 3 Yes
+				32 _Source_[(B) Has piracy skills]_ 10 [4]_Pirate
+			0.5 TAIL: 3
+				19 (X) Boarding skills 2 No
+				20 (X) Seafaring skills 3 Yes
+				32 _Source_[(B) Has piracy skills]_ 10 [4]_Pirate
+			0.9 TAIL: 3
+				19 (X) Boarding skills 2 No
+				20 (X) Seafaring skills 2 No
+				32 _Source_[(B) Has piracy skills]_ 10 [4]_Pirate
+			0.1 TAIL: 3
+				19 (X) Boarding skills 3 Yes
+				20 (X) Seafaring skills 3 Yes
+				32 _Source_[(B) Has piracy skills]_ 10 [4]_Pirate
+	3 Yes
+		SUPPORTS: 4
+			0.5 TAIL: 3
+				19 (X) Boarding skills 2 No
+				20 (X) Seafaring skills 3 Yes
+				32 _Source_[(B) Has piracy skills]_ 10 [4]_Pirate
+			0.5 TAIL: 3
+				20 (X) Seafaring skills 2 No
+				19 (X) Boarding skills 3 Yes
+				32 _Source_[(B) Has piracy skills]_ 10 [4]_Pirate
+			0.1 TAIL: 3
+				19 (X) Boarding skills 2 No
+				20 (X) Seafaring skills 2 No
+				32 _Source_[(B) Has piracy skills]_ 10 [4]_Pirate
+			0.9 TAIL: 3
+				20 (X) Seafaring skills 3 Yes
+				19 (X) Boarding skills 3 Yes
+				32 _Source_[(B) Has piracy skills]_ 10 [4]_Pirate
+32 _Source_[(B) Has piracy skills]_
+	10 [4]_Pirate
+		SUPPORTS: 1
+			1.0 TAIL: 0
+15 (B) Has a skiff
+	2 No
+		SUPPORTS: 1
+			0.1 TAIL: 1
+				26 _Source_[(B) Has a skiff]_ 10 [4]_Pirate
+	3 Yes
+		SUPPORTS: 1
+			0.9 TAIL: 1
+				26 _Source_[(B) Has a skiff]_ 10 [4]_Pirate
+26 _Source_[(B) Has a skiff]_
+	10 [4]_Pirate
+		SUPPORTS: 1
+			1.0 TAIL: 0
+21 (B) Piracy cost is ok
+	2 No
+		SUPPORTS: 4
+			0.9 TAIL: 3
+				24 (B) Has piracy equipment 2 No
+				21 (B) Has piracy skills 2 No
+				32 _Source_[(B) Piracy cost is ok]_ 10 [4]_Pirate
+			0.7 TAIL: 3
+				21 (B) Has piracy skills 2 No
+				24 (B) Has piracy equipment 3 Yes
+				32 _Source_[(B) Piracy cost is ok]_ 10 [4]_Pirate
+			0.5 TAIL: 3
+				24 (B) Has piracy equipment 2 No
+				21 (B) Has piracy skills 3 Yes
+				32 _Source_[(B) Piracy cost is ok]_ 10 [4]_Pirate
+			0.3 TAIL: 3
+				21 (B) Has piracy skills 3 Yes
+				24 (B) Has piracy equipment 3 Yes
+				32 _Source_[(B) Piracy cost is ok]_ 10 [4]_Pirate
+	3 Yes
+		SUPPORTS: 4
+			0.5 TAIL: 3
+				21 (B) Has piracy skills 3 Yes
+				24 (B) Has piracy equipment 2 No
+				32 _Source_[(B) Piracy cost is ok]_ 10 [4]_Pirate
+			0.7 TAIL: 3
+				24 (B) Has piracy equipment 3 Yes
+				21 (B) Has piracy skills 3 Yes
+				32 _Source_[(B) Piracy cost is ok]_ 10 [4]_Pirate
+			0.1 TAIL: 3
+				24 (B) Has piracy equipment 2 No
+				21 (B) Has piracy skills 2 No
+				32 _Source_[(B) Piracy cost is ok]_ 10 [4]_Pirate
+			0.3 TAIL: 3
+				21 (B) Has piracy skills 2 No
+				24 (B) Has piracy equipment 3 Yes
+				32 _Source_[(B) Piracy cost is ok]_ 10 [4]_Pirate
+32 _Source_[(B) Piracy cost is ok]_
+	10 [4]_Pirate
+		SUPPORTS: 1
+			1.0 TAIL: 0
+FREE_SUPPORTS:
